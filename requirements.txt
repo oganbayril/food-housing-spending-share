@@ -1,0 +1,4 @@
+# Direct dependencies. uv users: `uv sync` uses pyproject.toml + uv.lock instead.
+pandas>=3.0.6
+plotly>=7.1.0
+requests>=2.34.2

@@ -1,0 +1,18 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Raw downloads are re-creatable from the source APIs, so they stay out of git.
+# Processed data IS committed so results are visible without running anything.
+data/raw/*
+!data/raw/.gitkeep

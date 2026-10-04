@@ -1,0 +1,11 @@
+[project]
+name = "food-housing-spending-share"
+version = "0.1.0"
+description = "Share of household spending on food and housing & utilities across OECD and European countries."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pandas>=3.0.6",
+    "plotly>=7.1.0",
+    "requests>=2.34.2",
+]
