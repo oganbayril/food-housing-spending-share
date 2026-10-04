@@ -38,6 +38,12 @@ year slider. Benchmarked against fixed thresholds, not each country's own past.
 - Eurostat `ilc_lvho07a`: housing cost overburden rate (validation of tiers)
 - Eurostat `ilc_lvho02`: owner/tenant distribution (hover context)
 
+Verified 2026-10-04: all three Eurostat datasets exist as expected
+(`nama_10_co3_p3` also publishes `PC_TOT`, used as a cross-check only). OECD
+codes changed: `DSD_NAMAIN10@DF_TABLE5_T501` (COICOP 1999) and
+`DSD_NAMAIN10@DF_TABLE5A_T501` (COICOP 2018), coverage split between them
+(DATA_NOTES.md issue 5). Run Python via `uv run python`, never bare `python`.
+
 Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
 
 ## Working agreement
@@ -52,13 +58,13 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
      them in DATA_NOTES.md (raw material for the README limitations section).
   4. Only after confirmation: all years/countries, then OECD for non-EU members.
 - Don't build the map, tiers or README until asked. Ask before expanding scope.
-- Commit after each working step.
+- Commit after each working step, then push to origin (GitHub) right away.
 - User is self-taught: simple, readable pandas, no clever one-liners. Briefly
   explain WHY for each non-obvious decision so they can defend it in interviews.
 
 ## Status
 
 - [x] Step 1: project setup
-- [ ] Step 2: Eurostat loader (1 year, 5 countries)
-- [ ] Step 3: review + DATA_NOTES.md
+- [x] Step 2: Eurostat loader (1 year, 5 countries)
+- [x] Step 3: review + DATA_NOTES.md (awaiting user confirmation)
 - [ ] Step 4: all years/countries + OECD
