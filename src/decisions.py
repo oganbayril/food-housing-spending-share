@@ -66,6 +66,12 @@ FIRST_YEAR = 1995
 MAP_LAST_YEAR = 2024
 MAP_DEFAULT_YEAR = 2024
 
+# Tier thresholds for essentials_share (food + housing & utilities as a % of
+# total spending). PROVISIONAL; rationale in DATA_NOTES.md (D14). A share at
+# or above a threshold moves up a tier.
+TIER_THRESHOLDS = [35, 45]
+TIER_LABELS = ["Lower", "Moderate", "Higher"]
+
 # Category labels. Housing says "incl. imputed rent" because about half of it,
 # in most countries, is rent that owner-occupiers do not actually pay.
 CATEGORY_LABELS = {

@@ -18,6 +18,9 @@ All figures are official statistics from Eurostat and the OECD.
   0.5 percentage points for housing and up to 0.9 points for food. The cause
   of the difference has not been established, so UK values carry this extra
   uncertainty.
+- The OECD publishes no provisional flags for the UK series, including the
+  most recent years. A UK value without a "provisional" note is therefore
+  not evidence that the figure is final; recent years may still be revised.
 - Checked before mapping: the OECD's UK series uses the same classification
   for all years (COICOP 1999) and the same definition of total spending as
   Eurostat (all household spending on the country's territory).

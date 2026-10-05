@@ -196,7 +196,9 @@ Confirmed before mapping:
   territory"), the same as Eurostat's totals. `load_oecd.py` now stops with
   an error if any OECD row uses another transaction.
 - No OECD status flags on any UK value (none marked provisional, including
-  2024-2025).
+  2024-2025). **The absence of a flag is not evidence that the figures are
+  final**: the OECD simply publishes none for this series, and recent years
+  may still be revised. (Also stated in the README.)
 
 Caveats:
 - **The UK is the only European country sourced from the OECD.** The `source`
@@ -211,7 +213,9 @@ Caveats:
 ### D13. Hover footnotes for the largest version gaps
 Countries and measures where the COICOP 1999 and 2018 versions differ by 4+
 points in at least one year (table in D2) carry the largest gap in
-`large_version_gap_pts`, for a hover footnote:
+`large_version_gap_pts` and a footnote text in `version_gap_note`:
+"Older (COICOP 1999) and current (COICOP 2018) figures for this country
+differ by up to X points (gap measured up to 2022)."
 Latvia housing (6.24), Romania housing (7.57), Czechia housing (6.86),
 Montenegro food (6.29), Bosnia and Herzegovina food (4.22).
 
@@ -220,6 +224,58 @@ the years where a 4+ gap was measured. Why: the gap can only be measured up
 to 2022 (where the 1999 data ends), and for Latvia, Romania and Czechia it is
 still above 4 points in 2022, so there is no reason to assume it closed in
 2023-2024, the years the map opens on.
+
+### D14. Tiers: rationale and provisional thresholds (set before computing)
+Written down and committed **before** any `essentials_share` value was
+computed, so the thresholds cannot have been fitted to the results. (The
+only shares seen beforehand were the 2022 test sample of five countries in
+step 2, and separate food/housing shares during the version checks; the
+combined essentials share had not been computed for any country.)
+
+Measure: **`essentials_share` = (food CP01 + housing & utilities CP04) as a
+% of total household consumption spending**, per country and year.
+
+Thresholds (**provisional**):
+
+| Tier | essentials_share |
+|---|---|
+| Lower | below 35% |
+| Moderate | 35% to 45% |
+| Higher | above 45% |
+
+Rationale:
+- **Fixed thresholds, the same for every country and year.** The project
+  benchmarks countries against a common yardstick, not against their own
+  past, so a country moves tier only if its share actually crosses a line.
+- **Neutral labels** (lower / moderate / higher), not "good / bad": a higher
+  share is not by itself a problem (it also reflects imputed rent, prices,
+  and what else households spend on), and the measure is a share of
+  spending, not of income.
+- **Round numbers, proposed by the project owner.** They are not taken from
+  an external standard; that is why they are provisional and are checked
+  against the data below before use.
+- **Boundaries:** exactly 35.0 counts as moderate and exactly 45.0 as higher
+  (a share at or above a threshold moves up a tier).
+
+Checks fixed in advance (results in the next section):
+1. Distribution of `essentials_share`, 2024 and all map years (1995-2024),
+   with tier counts. **Rule: if more than 70% of countries fall in one tier
+   in 2024, the thresholds are not changed automatically; the numbers go to
+   the project owner to decide.**
+2. Rank (Spearman) correlation with Eurostat's housing cost overburden rate
+   (`ilc_lvho07a`, total population), where both exist. External check: a
+   tier meant to say "essentials weigh heavily" should not run against the
+   share of people overburdened by housing costs.
+3. Rank correlation with GDP per capita (World Bank, PPP, current
+   international $; one source covering all 49 countries including Kosovo).
+   Context: richer countries are expected to spend a smaller share on food.
+4. Boundary check (`src/tier_checks.py`):
+   - Type 1: country-years in both COICOP versions whose essentials tier
+     differs between versions.
+   - Type 2: countries with no observable version gap, whose value is
+     within the margin of a threshold. Margin: the 90th percentile of the
+     essentials version gap from 2020 onwards; for the UK, plus its largest
+     Eurostat-vs-OECD essentials difference (D12).
 
 ## Missing values (both sources, 1995-2024)
 *Script: `src/check_missing_values.py`*
