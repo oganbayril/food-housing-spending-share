@@ -16,6 +16,7 @@ Run from the project root:
 import pandas as pd
 
 from country_codes import EUROSTAT_AGGREGATES
+from decisions import is_frozen
 from sources import download_eurostat, save_check
 
 
@@ -51,6 +52,38 @@ def coverage(shares):
         }
     )
     return table
+
+
+def gap_stats_by_period(both):
+    """Typical and worst-case gap between versions, per period.
+
+    Periods: all years, before 2015, 2015 onwards, and 2020 onwards (a subset
+    of 2015 onwards, reported separately because recent years are what the
+    map will mostly be looked at for).
+    """
+    periods = {
+        "all years": both,
+        "before 2015": both[both["year"] < 2015],
+        "2015 onwards": both[both["year"] >= 2015],
+        "2020 onwards": both[both["year"] >= 2020],
+    }
+    rows = []
+    for period, data in periods.items():
+        for measure in ["food", "housing"]:
+            size = data[f"{measure}_gap"].abs()
+            worst_row = data.loc[size.idxmax()]
+            rows.append(
+                {
+                    "period": period,
+                    "measure": measure,
+                    "country_years": len(size),
+                    "median": round(size.median(), 2),
+                    "p90": round(size.quantile(0.9), 2),
+                    "max": round(size.max(), 2),
+                    "max_at": f"{worst_row['geo']} {worst_row['year']}",
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def find_frozen_shares(shares, label):
@@ -98,16 +131,21 @@ def main():
     both = shares_99.merge(shares_18, on=["geo", "year"], suffixes=("_1999", "_2018"))
     both["food_gap"] = both["food_share_2018"] - both["food_share_1999"]
     both["housing_gap"] = both["housing_share_2018"] - both["housing_share_1999"]
+
+    # Leave out frozen back-data (Romania 1995-2009): those 2018 values are
+    # not measurements, so they would exaggerate the real gap between versions.
+    frozen = []
+    for geo, year in zip(both["geo"], both["year"]):
+        frozen.append(is_frozen(geo, year))
+    both["frozen"] = frozen
+    print(f"\nExcluding {sum(frozen)} frozen country-years from the gap statistics.")
+    both = both[~both["frozen"]].drop(columns="frozen")
     save_check(both, "coicop_versions_overlap.csv")
 
-    print(f"\nOverlapping country-years: {len(both)}")
-    for column in ["food_gap", "housing_gap"]:
-        size = both[column].abs()
-        print(
-            f"  {column} (percentage points, absolute): "
-            f"median {size.median():.2f}, 90th percentile {size.quantile(0.9):.2f}, "
-            f"max {size.max():.2f}"
-        )
+    margin = gap_stats_by_period(both)
+    print("\nGap between versions by period (percentage points, absolute):")
+    print(margin.to_string(index=False))
+    save_check(margin, "coicop_versions_gap_by_period.csv")
 
     print("\nLargest absolute gap per country (percentage points):")
     per_country = both.groupby("geo")[["food_gap", "housing_gap"]].agg(

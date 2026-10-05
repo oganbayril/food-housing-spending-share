@@ -32,7 +32,9 @@ year slider. Benchmarked against fixed thresholds, not each country's own past.
 
 ## Data sources (structure must be verified before building on them)
 
-- Eurostat `nama_10_co3_p3`: household consumption by COICOP purpose (main, annual)
+- Eurostat `nama_10_cp18` (COICOP 2018, preferred) and `nama_10_co3_p3`
+  (COICOP 1999, fallback): household consumption by purpose. Version rules,
+  exceptions and all other data decisions: DATA_NOTES.md + `src/decisions.py`
 - OECD national accounts, household spending by COICOP (non-EU OECD members;
   dataset codes likely changed with the OECD Data Explorer move)
 - Eurostat `ilc_lvho07a`: housing cost overburden rate (validation of tiers)
@@ -66,5 +68,7 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
 
 - [x] Step 1: project setup
 - [x] Step 2: Eurostat loader (1 year, 5 countries)
-- [x] Step 3: review + DATA_NOTES.md (awaiting user confirmation)
-- [ ] Step 4: all years/countries + OECD
+- [x] Step 3: review + DATA_NOTES.md
+- [x] Step 4a: Eurostat all years/countries, ISO-3, missing-values count
+- [ ] Step 4b: OECD for non-EU members (awaiting go-ahead)
+- Tier thresholds not set yet; when they are, run `src/tier_checks.py` functions.

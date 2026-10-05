@@ -1,0 +1,9 @@
+period,measure,country_years,median,p90,max,max_at
+all years,food,890,0.07,1.11,6.29,ME 2006
+all years,housing,890,0.17,1.72,7.57,RO 2016
+before 2015,food,622,0.03,1.11,6.29,ME 2006
+before 2015,housing,622,0.13,1.5,6.95,RO 2013
+2015 onwards,food,268,0.21,1.14,4.37,ME 2023
+2015 onwards,housing,268,0.3,2.76,7.57,RO 2016
+2020 onwards,food,113,0.24,1.24,4.37,ME 2023
+2020 onwards,housing,113,0.33,2.31,7.11,RO 2020
