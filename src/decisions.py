@@ -15,6 +15,32 @@ VERSION_OVERRIDES = {
     "LT": "1999",
 }
 
+# Which source to use per country (ISO-3).
+# Default rule: Eurostat if the country is in it, otherwise the OECD. One
+# source per country for its whole series: sources are never mixed.
+# Exceptions to the default rule:
+SOURCE_OVERRIDES = {
+    # Eurostat's UK series ends in 2019; the OECD's runs to 2025. The two
+    # differ by 0.5-0.9 points (cause not verified), so instead of adding the
+    # OECD years to the Eurostat series, the WHOLE UK series comes from the
+    # OECD. The UK is the only European country sourced from the OECD.
+    "GBR": "OECD",
+}
+
+# Country-measures where the COICOP 1999 and 2018 versions differ by 4+
+# points in at least one year (src/investigate_coicop_versions.py). Value:
+# the largest gap in points, shown as a hover footnote for every year of that
+# country and measure. Every year, not only the measured ones: the gap can
+# only be measured up to 2022 (where the 1999 data ends), and for LV, RO and
+# CZ it is still large in 2022, so there is no reason to think it closed.
+LARGE_VERSION_GAPS = {
+    ("LVA", "CP04"): 6.24,
+    ("ROU", "CP04"): 7.57,  # excluding Romania's frozen 1995-2009 years
+    ("CZE", "CP04"): 6.86,
+    ("MNE", "CP01"): 6.29,
+    ("BIH", "CP01"): 4.22,
+}
+
 # Years whose values are published but treated as missing.
 # Romania's COICOP 2018 shares are identical every year from 1995 to 2009,
 # so those years were estimated by holding the spending structure fixed, not

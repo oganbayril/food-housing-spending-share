@@ -13,7 +13,13 @@ table, so both sources go through exactly the same calculation.
 
 import pandas as pd
 
-from decisions import CATEGORY_LABELS, FIRST_YEAR, HIGH_TOURISM_ISO3, is_frozen
+from decisions import (
+    CATEGORY_LABELS,
+    FIRST_YEAR,
+    HIGH_TOURISM_ISO3,
+    LARGE_VERSION_GAPS,
+    is_frozen,
+)
 
 UNIT_VALUES = "CP_MNAC"
 UNIT_CHECK = "PC_TOT"
@@ -37,6 +43,7 @@ COLUMN_ORDER = [
     "flag",
     "frozen_back_data",
     "high_tourism",
+    "large_version_gap_pts",
 ]
 
 
@@ -121,5 +128,12 @@ def compute_shares(data, source, iso3_lookup):
 
     result["diff_vs_eurostat"] = result["share_pct"] - result["eurostat_pc_tot"]
     result["high_tourism"] = result["iso3"].isin(HIGH_TOURISM_ISO3)
+
+    # Footnote: largest COICOP 1999-vs-2018 gap for this country and measure,
+    # where it reaches 4+ points (empty otherwise).
+    gaps = []
+    for iso3, code in zip(result["iso3"], result["coicop"]):
+        gaps.append(LARGE_VERSION_GAPS.get((iso3, code)))
+    result["large_version_gap_pts"] = gaps
 
     return result[COLUMN_ORDER]

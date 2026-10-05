@@ -8,9 +8,10 @@ by purpose"):
 Same rules as the Eurostat loader: one COICOP version per country, COICOP 2018
 if available, and the same share calculation (shares.py).
 
-Only countries that are NOT already in the Eurostat data are taken from the
-OECD, so every country has exactly one source (sources are never mixed within
-a country; see src/compare_eurostat_oecd.py for how the two sources compare).
+Taken from the OECD: members NOT in the Eurostat data, plus countries that
+decisions.SOURCE_OVERRIDES assigns to the OECD (the UK). Every country has
+exactly one source for its whole series (see src/compare_eurostat_oecd.py for
+how the two sources compare).
 
 Run from the project root, after src/load_eurostat.py:
     uv run python src/load_oecd.py
@@ -19,6 +20,7 @@ Run from the project root, after src/load_eurostat.py:
 import pandas as pd
 
 from country_codes import OECD_MEMBERS_ISO3
+from decisions import SOURCE_OVERRIDES
 from shares import IMPUTED_RENT_CODE, TOTAL_CODE, UNIT_VALUES, compute_shares
 from sources import PROCESSED_DIR, download_oecd
 
@@ -47,6 +49,14 @@ def download_version(version):
     # unit as Eurostat's CP_MNAC. Stop if that ever changes.
     if not (raw["UNIT_MULT"] == 6).all() or not (raw["UNIT_MEASURE"] == "XDC").all():
         raise ValueError("Unexpected OECD unit: expected millions of national currency")
+
+    # Concept: P31DC = spending of residents and non-residents on the
+    # territory (domestic concept), the same as Eurostat's totals. The
+    # national concept would be P31NC. Stop if anything else shows up, so
+    # the two sources can never be mixed on different concepts.
+    transactions = set(raw["TRANSACTION"].dropna())
+    if transactions != {"P31DC"}:
+        raise ValueError(f"Unexpected OECD transaction(s): {transactions}")
 
     # Some series are listed with no observations at all (e.g. Japan in the
     # 1999 table): one row with an empty year. They carry no data, so drop
@@ -92,12 +102,13 @@ def main():
     eurostat = pd.read_csv(PROCESSED_DIR / "eurostat_shares.csv")
     in_eurostat = set(eurostat["iso3"])
 
-    # OECD members not covered by Eurostat.
+    # OECD members not covered by Eurostat, plus countries that
+    # decisions.SOURCE_OVERRIDES assigns to the OECD (the UK).
     countries = []
     for iso3 in sorted(OECD_MEMBERS_ISO3):
-        if iso3 not in in_eurostat:
+        if iso3 not in in_eurostat or SOURCE_OVERRIDES.get(iso3) == "OECD":
             countries.append(iso3)
-    print(f"OECD members not in the Eurostat data: {', '.join(countries)}")
+    print(f"Countries taken from the OECD: {', '.join(countries)}")
 
     data_2018 = download_version("2018")
     data_1999 = download_version("1999")

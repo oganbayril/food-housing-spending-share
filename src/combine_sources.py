@@ -1,7 +1,10 @@
 """Combine the Eurostat and OECD shares into one file for the map.
 
-Every country must come from exactly one source (sources are never mixed
-within a country). This script stops with an error if that is ever violated.
+Every country comes from exactly one source (sources are never mixed within
+a country). By default that is Eurostat; decisions.SOURCE_OVERRIDES moves a
+country's whole series to the OECD (the UK). eurostat_shares.csv still
+contains those countries, so the two sources can be compared; they are
+dropped here. The script stops with an error if a country ends up in both.
 
 Run from the project root, after src/load_eurostat.py and src/load_oecd.py:
     uv run python src/combine_sources.py
@@ -9,12 +12,20 @@ Run from the project root, after src/load_eurostat.py and src/load_oecd.py:
 
 import pandas as pd
 
+from decisions import SOURCE_OVERRIDES
 from sources import PROCESSED_DIR
 
 
 def main():
     eurostat = pd.read_csv(PROCESSED_DIR / "eurostat_shares.csv")
     oecd = pd.read_csv(PROCESSED_DIR / "oecd_shares.csv")
+
+    moved = []
+    for iso3, source in SOURCE_OVERRIDES.items():
+        if source == "OECD":
+            moved.append(iso3)
+    eurostat = eurostat[~eurostat["iso3"].isin(moved)]
+    print(f"Taken from the OECD instead of Eurostat: {', '.join(moved)}")
 
     in_both = set(eurostat["iso3"]) & set(oecd["iso3"])
     if in_both:

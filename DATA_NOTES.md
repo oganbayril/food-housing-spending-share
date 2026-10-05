@@ -141,9 +141,9 @@ show up as empty rows instead of disappearing.
   processed files. (`MAP_LAST_YEAR`, `MAP_DEFAULT_YEAR` in `decisions.py`.)
 
 ### D10. One source per country: Eurostat first, OECD for the rest
-`source` column: "Eurostat" or "OECD". Eurostat covers 38 European countries;
-the OECD adds the 11 OECD members Eurostat does not have (AUS, CAN, CHL, COL,
-CRI, ISR, JPN, KOR, MEX, NZL, USA). Same version rule (D1) and the same share
+`source` column: "Eurostat" or "OECD". Eurostat covers 37 European countries;
+the OECD covers 12: the 11 OECD members Eurostat does not have (AUS, CAN,
+CHL, COL, CRI, ISR, JPN, KOR, MEX, NZL, USA) plus the UK (D12). Same version rule (D1) and the same share
 calculation (`src/shares.py`). `src/combine_sources.py` stops with an error if
 a country ever appears in both sources. Countries in the OECD tables that are
 not OECD members (Brazil, Hong Kong, Russia, ...) are out of scope.
@@ -165,8 +165,10 @@ COICOP version:
 - **21 match within rounding** (0.05 points) in every overlapping year.
 - **UK: does not match.** 49 of 50 values differ; food by up to 0.89 points
   (2015), housing by about 0.5 points in most years. The totals differ by
-  0.5-0.8%. Likely cause: Eurostat's UK series is the last one the UK sent
-  before leaving the EU, while the OECD has later revisions from the ONS.
+  0.5-0.8%. **The cause is not verified.** One possible explanation is that
+  Eurostat's UK series is an older vintage that stopped being updated after
+  2019 while the OECD's was revised later, but nobody has checked this, so
+  it must not be stated as the reason.
 - **Austria** 2022-2024 housing (up to 0.24, Eurostat flags a series break
   in 2022), **Turkey** 2024 (housing 0.68), **Lithuania** 2022-2023 (up to
   0.08): small differences in recent years only, likely revisions published
@@ -176,22 +178,61 @@ COICOP version:
 
 Extra years: the **UK is the only country where the OECD has years Eurostat
 does not (2020-2025)**. Because the UK does not match within rounding, the
-OECD years are not added: that would mix two sources (and two vintages)
-within one series. **Open decision (user):** keep the UK on Eurostat ending
-in 2019, or switch the whole UK series (1995-2025) to the OECD.
+OECD years are not appended to the Eurostat series: that would mix two
+sources within one series. See D12 for what was decided instead.
+
+### D12. The UK's whole series comes from the OECD
+Decided: the UK is taken entirely from the OECD (1995-2025), not from
+Eurostat (which ends in 2019). One source for the whole series, so nothing
+is mixed. (`SOURCE_OVERRIDES` in `decisions.py`; `eurostat_shares.csv` still
+contains the Eurostat UK series for comparison, and `combine_sources.py`
+drops it.)
+
+Confirmed before mapping:
+- **COICOP version: 1999.** The UK is not in the OECD's 2018 table, so 1999
+  covers the whole series. Food and housing shares exist for all 31 years,
+  with imputed rent.
+- **Concept: domestic** (`P31DC`, "residents and non-residents on the
+  territory"), the same as Eurostat's totals. `load_oecd.py` now stops with
+  an error if any OECD row uses another transaction.
+- No OECD status flags on any UK value (none marked provisional, including
+  2024-2025).
+
+Caveats:
+- **The UK is the only European country sourced from the OECD.** The `source`
+  column marks it, for the hover.
+- **Extra uncertainty for the UK only:** where Eurostat and the OECD both
+  publish UK figures (1995-2019) they differ by about **0.5 points for
+  housing and up to 0.9 points for food**, with no verified cause. Treat UK
+  values as carrying this extra margin on top of the version margin (D2).
+- The UK's shares cannot be cross-checked against Eurostat's published
+  `PC_TOT`, unlike the other European countries.
+
+### D13. Hover footnotes for the largest version gaps
+Countries and measures where the COICOP 1999 and 2018 versions differ by 4+
+points in at least one year (table in D2) carry the largest gap in
+`large_version_gap_pts`, for a hover footnote:
+Latvia housing (6.24), Romania housing (7.57), Czechia housing (6.86),
+Montenegro food (6.29), Bosnia and Herzegovina food (4.22).
+
+The footnote applies to **every year** of that country and measure, not only
+the years where a 4+ gap was measured. Why: the gap can only be measured up
+to 2022 (where the 1999 data ends), and for Latvia, Romania and Czechia it is
+still above 4 points in 2022, so there is no reason to assume it closed in
+2023-2024, the years the map opens on.
 
 ## Missing values (both sources, 1995-2024)
 *Script: `src/check_missing_values.py`*
 
-49 countries x 30 years = 1,470 country-years; **114 missing (7.8%)**:
-99 not published, 15 frozen back-data (Romania).
+49 countries x 30 years = 1,470 country-years; **109 missing (7.4%)**:
+94 not published, 15 frozen back-data (Romania). (UK from the OECD, D12.)
 
 - **No gaps inside any country's series.** All missing years are at the start
   or the end.
 - **Late starters:** BA, MK 2000; COL 2005; ME 2006; XK 2008; TR 2009;
   RO 2010 (D3); CHL 2018.
-- **Early enders:** XK 2017, UK 2019, CRI 2021, LT, MK, NO 2023.
-- **2024 (the map's default year): 43 of 49 countries.** Missing: UK, LT, MK,
+- **Early enders:** XK 2017, CRI 2021, LT, MK, NO 2023.
+- **2024 (the map's default year): 44 of 49 countries.** Missing: LT, MK,
   NO, XK, CRI.
 - **No imputed-rent figure for the hover:** CH, TR (confidential), KOR, NZL,
   COL, CHL (not published), NO (2 years).
