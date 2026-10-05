@@ -8,8 +8,9 @@ Steps:
 1. Download both versions and save them untouched to data/raw/.
 2. Pick one version per country (see decisions.py) and keep only that one.
 3. Compute food (CP01) and housing & utilities (CP04) as a % of total
-   household consumption, plus imputed rent (CP042) as a % of total.
-4. Save one tidy table to data/processed/eurostat_shares.csv.
+   household consumption, plus imputed rent (CP042) as a % of total
+   (calculation in shares.py, shared with the OECD loader).
+4. Save to data/processed/eurostat_shares.csv.
 
 Run from the project root:
     uv run python src/load_eurostat.py
@@ -18,12 +19,8 @@ Run from the project root:
 import pandas as pd
 
 from country_codes import EUROSTAT_AGGREGATES, EUROSTAT_TO_ISO3
-from decisions import (
-    CATEGORY_LABELS,
-    HIGH_TOURISM_ISO3,
-    VERSION_OVERRIDES,
-    is_frozen,
-)
+from decisions import CATEGORY_LABELS, VERSION_OVERRIDES
+from shares import IMPUTED_RENT_CODE, TOTAL_CODE, UNIT_CHECK, UNIT_VALUES, compute_shares
 from sources import PROCESSED_DIR, download_eurostat
 
 # Dataset code and the name of its COICOP column, per version.
@@ -32,28 +29,16 @@ VERSIONS = {
     "1999": {"dataset": "nama_10_co3_p3", "coicop_column": "coicop"},
 }
 
-# CP_MNAC = current prices, million units of national currency. Shares are
-#   computed from this. Current prices because a share of spending should
-#   reflect what households actually paid that year. National currency
-#   because a ratio within one country does not depend on the currency.
-# PC_TOT = Eurostat's own published "percentage of total", kept only as a
-#   cross-check of our calculation (the OECD data has no such column, so
-#   computing the share ourselves keeps one method for every country).
-UNIT_VALUES = "CP_MNAC"
-UNIT_CHECK = "PC_TOT"
-
-TOTAL_CODE = "TOTAL"
-IMPUTED_RENT_CODE = "CP042"
-
-# The map's time range starts in 1995: from then on (almost) every country
-# reports. Earlier years exist for only a few countries (DK, FR, FI, NO, SE)
-# and are kept in the file, but missing years before 1995 are not counted
-# as gaps.
-FIRST_YEAR = 1995
-
 
 def download_version(version):
-    """Download one COICOP version for all countries and years."""
+    """Download one COICOP version for all countries and years.
+
+    Units: CP_MNAC (current prices, million national currency) to compute
+    shares from, and PC_TOT (Eurostat's published share) as a cross-check.
+    Current prices because a share of spending should reflect what households
+    actually paid that year; national currency because a ratio within one
+    country does not depend on the currency.
+    """
     dataset = VERSIONS[version]["dataset"]
     coicop_column = VERSIONS[version]["coicop_column"]
 
@@ -109,103 +94,6 @@ def keep_chosen_version(raw_2018, raw_1999, choice):
     return pd.concat(frames, ignore_index=True)
 
 
-def build_grid(data):
-    """Every country x year x category we expect, so gaps stay visible.
-
-    Years run from 1995 (or a country's first year, if earlier) to the latest
-    year in the data. A country-year that Eurostat does not publish becomes a
-    row with no values instead of silently not existing.
-    """
-    last_year = data["year"].max()
-    rows = []
-    for country, group in data.groupby("country_code"):
-        first_year = min(FIRST_YEAR, group["year"].min())
-        version = group["coicop_version"].iloc[0]
-        for year in range(first_year, last_year + 1):
-            for code in CATEGORY_LABELS:
-                rows.append(
-                    {
-                        "country_code": country,
-                        "year": year,
-                        "coicop_version": version,
-                        "coicop": code,
-                    }
-                )
-    return pd.DataFrame(rows)
-
-
-def compute_shares(data):
-    """One row per country, year and category, with the share and context."""
-    values = data[data["unit"] == UNIT_VALUES]
-    published = data[data["unit"] == UNIT_CHECK]
-    keys = ["country_code", "year"]
-
-    totals = values[values["coicop"] == TOTAL_CODE]
-    totals = totals[keys + ["value", "flag"]]
-    totals = totals.rename(columns={"value": "total_mnac", "flag": "total_flag"})
-
-    imputed = values[values["coicop"] == IMPUTED_RENT_CODE]
-    imputed = imputed[keys + ["value"]]
-    imputed = imputed.rename(columns={"value": "imputed_rent_mnac"})
-
-    spending = values[values["coicop"].isin(CATEGORY_LABELS.keys())]
-    spending = spending[keys + ["coicop", "value", "flag"]]
-    spending = spending.rename(columns={"value": "spending_mnac"})
-
-    published = published[published["coicop"].isin(CATEGORY_LABELS.keys())]
-    published = published[keys + ["coicop", "value"]]
-    published = published.rename(columns={"value": "eurostat_pc_tot"})
-
-    result = build_grid(data)
-    result = result.merge(spending, on=keys + ["coicop"], how="left")
-    result = result.merge(totals, on=keys, how="left")
-    result = result.merge(imputed, on=keys, how="left")
-    result = result.merge(published, on=keys + ["coicop"], how="left")
-
-    result["iso3"] = result["country_code"].map(EUROSTAT_TO_ISO3)
-    result["category"] = result["coicop"].map(CATEGORY_LABELS)
-    result["share_pct"] = result["spending_mnac"] / result["total_mnac"] * 100
-
-    # Imputed rent as a % of total spending, shown in the housing hover
-    # ("of which imputed rent: X%"). Only meaningful on the housing rows.
-    imputed_share = result["imputed_rent_mnac"] / result["total_mnac"] * 100
-    result["imputed_rent_share_pct"] = imputed_share.where(result["coicop"] == "CP04")
-
-    # A share is provisional/estimated if either the category or the total
-    # is, so take the category's flag and fall back to the total's.
-    result["flag"] = result["flag"].fillna(result["total_flag"])
-
-    # Frozen back-data: keep the published values, but no share.
-    frozen = []
-    for country, year in zip(result["country_code"], result["year"]):
-        frozen.append(is_frozen(country, year))
-    result["frozen_back_data"] = frozen
-    result.loc[result["frozen_back_data"], "share_pct"] = None
-    result.loc[result["frozen_back_data"], "imputed_rent_share_pct"] = None
-
-    result["diff_vs_eurostat"] = result["share_pct"] - result["eurostat_pc_tot"]
-    result["high_tourism"] = result["iso3"].isin(HIGH_TOURISM_ISO3)
-
-    column_order = [
-        "country_code",
-        "iso3",
-        "year",
-        "coicop_version",
-        "coicop",
-        "category",
-        "spending_mnac",
-        "total_mnac",
-        "share_pct",
-        "imputed_rent_share_pct",
-        "eurostat_pc_tot",
-        "diff_vs_eurostat",
-        "flag",
-        "frozen_back_data",
-        "high_tourism",
-    ]
-    return result[column_order]
-
-
 def report(result, choice):
     """Print checks. This only reports; it changes nothing."""
     print("\nCOICOP version per country:")
@@ -240,7 +128,7 @@ def main():
 
     choice = choose_versions(raw_2018, raw_1999)
     data = keep_chosen_version(raw_2018, raw_1999, choice)
-    result = compute_shares(data)
+    result = compute_shares(data, "Eurostat", EUROSTAT_TO_ISO3)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     path = PROCESSED_DIR / "eurostat_shares.csv"

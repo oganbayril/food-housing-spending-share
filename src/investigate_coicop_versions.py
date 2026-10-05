@@ -19,6 +19,8 @@ from country_codes import EUROSTAT_AGGREGATES
 from decisions import is_frozen
 from sources import download_eurostat, save_check
 
+LARGE_GAP = 4  # percentage points; gaps this big are listed one by one
+
 
 def compute_shares(raw, coicop_column):
     """Food and housing shares per country and year, from one dataset."""
@@ -146,6 +148,15 @@ def main():
     print("\nGap between versions by period (percentage points, absolute):")
     print(margin.to_string(index=False))
     save_check(margin, "coicop_versions_gap_by_period.csv")
+
+    # Worst cases: candidates for a footnote in the hover.
+    print(f"\nCountry-years with a gap of {LARGE_GAP}+ points (either measure):")
+    large = both[
+        (both["food_gap"].abs() >= LARGE_GAP) | (both["housing_gap"].abs() >= LARGE_GAP)
+    ]
+    large = large[["geo", "year", "food_gap", "housing_gap"]]
+    print(large.round(2).to_string(index=False))
+    save_check(large, "coicop_versions_large_gaps.csv")
 
     print("\nLargest absolute gap per country (percentage points):")
     per_country = both.groupby("geo")[["food_gap", "housing_gap"]].agg(

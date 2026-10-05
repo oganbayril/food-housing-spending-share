@@ -70,5 +70,9 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
 - [x] Step 2: Eurostat loader (1 year, 5 countries)
 - [x] Step 3: review + DATA_NOTES.md
 - [x] Step 4a: Eurostat all years/countries, ISO-3, missing-values count
-- [ ] Step 4b: OECD for non-EU members (awaiting go-ahead)
+- [x] Step 4b: OECD for non-EU members; combined file `data/processed/shares.csv`
+- Open decision: UK on Eurostat (ends 2019) or whole UK series from OECD (DATA_NOTES D11).
 - Tier thresholds not set yet; when they are, run `src/tier_checks.py` functions.
+
+Pipeline order: `load_eurostat.py` -> `load_oecd.py` -> `combine_sources.py`
+-> `check_missing_values.py` (all in `src/`, run with `uv run python`).

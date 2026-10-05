@@ -28,8 +28,20 @@ FROZEN_BACK_DATA = {
 # drives a note in the hover.
 HIGH_TOURISM_ISO3 = {"HRV", "GRC", "PRT", "LUX", "ISL", "ESP"}
 
-# Category labels. Housing says "incl. imputed rent" because more than half of
-# it, in most countries, is rent that owner-occupiers do not actually pay.
+# Time range.
+# Data starts in 1995: from then on (almost) every country reports. Earlier
+# years exist for a few countries only; they stay in the files, but missing
+# years before 1995 are not counted as gaps.
+FIRST_YEAR = 1995
+# The map's year slider ends at 2024 and opens on it. 2025 is left out
+# because only 16 of 38 European countries had published it (2026-10), so
+# the map would look half empty and the countries present would not be a
+# random sample. 2025 data stays in the processed files.
+MAP_LAST_YEAR = 2024
+MAP_DEFAULT_YEAR = 2024
+
+# Category labels. Housing says "incl. imputed rent" because about half of it,
+# in most countries, is rent that owner-occupiers do not actually pay.
 CATEGORY_LABELS = {
     "CP01": "Food & non-alcoholic beverages",
     "CP04": "Housing & utilities (incl. imputed rent)",

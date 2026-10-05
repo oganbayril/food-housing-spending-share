@@ -27,6 +27,8 @@ Rule:
 - `coicop_version` column records which one each row comes from.
 
 Result (Eurostat): 31 countries on 2018; AL, IS, LT, MK, NO, UK, XK on 1999.
+Result (OECD): ISR, JPN, KOR on 2018; AUS, CAN, CHL, COL, CRI, MEX, NZL, USA
+on 1999.
 
 Exception: **Lithuania uses 1999** (1995-2023), because its 2018 series only
 covers 2020-2024.
@@ -51,6 +53,22 @@ food, about 7 for housing. Largest housing gaps by country: RO, CZ (6.9),
 LV (6.2), MT (3.3), EE (3.2). For CZ and LV the totals themselves differ by
 3-7%, so this is a revision of the national accounts, not only the
 reclassification.
+
+OECD side: Israel is the only OECD-sourced country in both OECD versions;
+its gap is small (food max 0.27, housing max 0.60 points).
+
+**Worst cases (4+ points), candidates for hover footnotes**
+(`data/processed/checks/coicop_versions_large_gaps.csv`). All five countries
+use COICOP 2018 on the map; the gap can only be measured up to 2022, where
+the 1999 data ends.
+
+| Country | Measure | Years with a 4+ point gap | Largest |
+|---|---|---|---|
+| Latvia | housing | 2003-2008, 2012-2022 (17 years) | 6.24 (2007) |
+| Romania | housing | 2013-2022 (10 years) | 7.57 (2016) |
+| Czechia | housing | 2020-2022 | 6.86 (2022) |
+| Montenegro | food | 2006, 2007, 2009, 2011, 2012, 2014, 2019, 2023 | 6.29 (2006) |
+| Bosnia and Herzegovina | food | 2005, 2008, 2009 | 4.22 (2009) |
 
 Tier boundary check (`src/tier_checks.py`, ready to run once thresholds are
 set):
@@ -110,27 +128,73 @@ equivalent, so computing it ourselves keeps one method for all countries.
 Cross-check: 2,270 shares compared with `PC_TOT`, all within rounding except
 Montenegro 2007 housing (11.850 vs 11.8, exactly on the rounding edge).
 
-### D9. Missing values kept visible; time range from 1995
-The processed file has a row for every country x year x category, so gaps
-show up as empty rows instead of disappearing. Counting starts in 1995
-because that is when (almost) every country starts reporting; earlier years
-exist only for DK, FR, FI, NO, SE and are kept in the file.
+### D9. Missing values kept visible; time range 1995-2024, map opens on 2024
+The processed files have a row for every country x year x category, so gaps
+show up as empty rows instead of disappearing.
 
-## Missing values (Eurostat, 1995-2025)
+- Start: 1995, when (almost) every country starts reporting. Earlier years
+  exist for a few countries only and are kept in the files.
+- End: the year slider stops at **2024** and the map opens on it. 2025 is
+  left out of the slider because only 16 of 38 European countries had
+  published it (October 2026): the map would look half empty, and the
+  countries present would not be a random sample. 2025 values stay in the
+  processed files. (`MAP_LAST_YEAR`, `MAP_DEFAULT_YEAR` in `decisions.py`.)
+
+### D10. One source per country: Eurostat first, OECD for the rest
+`source` column: "Eurostat" or "OECD". Eurostat covers 38 European countries;
+the OECD adds the 11 OECD members Eurostat does not have (AUS, CAN, CHL, COL,
+CRI, ISR, JPN, KOR, MEX, NZL, USA). Same version rule (D1) and the same share
+calculation (`src/shares.py`). `src/combine_sources.py` stops with an error if
+a country ever appears in both sources. Countries in the OECD tables that are
+not OECD members (Brazil, Hong Kong, Russia, ...) are out of scope.
+
+OECD details:
+- Values are millions of national currency (checked: `UNIT_MULT` = 6, unit
+  `XDC`), current prices, transaction `P31DC` (domestic concept, same as
+  Eurostat).
+- OECD status codes are converted to Eurostat-style flags: `P` -> `p`,
+  `E` -> `e`, `B` -> `b`, `A` (normal) -> no flag.
+- 13 empty placeholder rows (series listed with no observations: CHE, JPN,
+  NOR, TUR) are dropped.
+
+### D11. Eurostat vs OECD where both publish: sources not mixed
+*Script: `src/compare_eurostat_oecd.py`*
+
+26 Eurostat countries are also in the OECD tables. Compared within the same
+COICOP version:
+- **21 match within rounding** (0.05 points) in every overlapping year.
+- **UK: does not match.** 49 of 50 values differ; food by up to 0.89 points
+  (2015), housing by about 0.5 points in most years. The totals differ by
+  0.5-0.8%. Likely cause: Eurostat's UK series is the last one the UK sent
+  before leaving the EU, while the OECD has later revisions from the ONS.
+- **Austria** 2022-2024 housing (up to 0.24, Eurostat flags a series break
+  in 2022), **Turkey** 2024 (housing 0.68), **Lithuania** 2022-2023 (up to
+  0.08): small differences in recent years only, likely revisions published
+  at different times.
+- **Norway**: no OECD data at all (only an empty placeholder).
+- **Iceland**: matches exactly, but the OECD has no years Eurostat lacks.
+
+Extra years: the **UK is the only country where the OECD has years Eurostat
+does not (2020-2025)**. Because the UK does not match within rounding, the
+OECD years are not added: that would mix two sources (and two vintages)
+within one series. **Open decision (user):** keep the UK on Eurostat ending
+in 2019, or switch the whole UK series (1995-2025) to the OECD.
+
+## Missing values (both sources, 1995-2024)
 *Script: `src/check_missing_values.py`*
 
-38 countries x 31 years = 1,178 country-years; **100 missing (8.5%)**:
-85 not published, 15 frozen back-data (Romania).
+49 countries x 30 years = 1,470 country-years; **114 missing (7.8%)**:
+99 not published, 15 frozen back-data (Romania).
 
 - **No gaps inside any country's series.** All missing years are at the start
   or the end.
-- **Late starters:** BA, MK 2000; ME 2006; XK 2008; TR 2009; RO 2010 (D3).
-- **Early enders:** XK 2017, UK 2019 (left the EU's reporting), LT, MK, NO 2023.
-- **Latest years are incomplete:** 2024 has 33 of 38 countries, **2025 only
-  16**. A map defaulting to 2025 would look half empty, and the countries
-  present would not be a random sample.
-- **No imputed-rent figure for the hover:** CH (all years) and TR (all
-  years), which are confidential; NO (2 years) and IT (1 year).
+- **Late starters:** BA, MK 2000; COL 2005; ME 2006; XK 2008; TR 2009;
+  RO 2010 (D3); CHL 2018.
+- **Early enders:** XK 2017, UK 2019, CRI 2021, LT, MK, NO 2023.
+- **2024 (the map's default year): 43 of 49 countries.** Missing: UK, LT, MK,
+  NO, XK, CRI.
+- **No imputed-rent figure for the hover:** CH, TR (confidential), KOR, NZL,
+  COL, CHL (not published), NO (2 years).
 
 ## Limitations (open issues, not fixed)
 

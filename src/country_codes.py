@@ -56,6 +56,16 @@ EUROSTAT_TO_ISO3 = {
     "XK": "XKX",
 }
 
+# The 38 OECD member countries (2026). Those not in the Eurostat data are
+# loaded from the OECD instead. The OECD tables also contain some
+# non-members (e.g. Brazil, Hong Kong); they are out of scope.
+OECD_MEMBERS_ISO3 = {
+    "AUS", "AUT", "BEL", "CAN", "CHE", "CHL", "COL", "CRI", "CZE", "DEU",
+    "DNK", "ESP", "EST", "FIN", "FRA", "GBR", "GRC", "HUN", "IRL", "ISL",
+    "ISR", "ITA", "JPN", "KOR", "LTU", "LUX", "LVA", "MEX", "NLD", "NOR",
+    "NZL", "POL", "PRT", "SVK", "SVN", "SWE", "TUR", "USA",
+}
+
 # Eurostat also publishes regional aggregates (EU, euro area). They are not
 # countries, so they are excluded from the country-level data.
 EUROSTAT_AGGREGATES = {"EU27_2020", "EA", "EA12", "EA19", "EA20", "EA21"}
