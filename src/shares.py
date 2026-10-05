@@ -37,6 +37,7 @@ COLUMN_ORDER = [
     "spending_mnac",
     "total_mnac",
     "share_pct",
+    "essentials_share",
     "imputed_rent_share_pct",
     "eurostat_pc_tot",
     "diff_vs_eurostat",
@@ -44,6 +45,7 @@ COLUMN_ORDER = [
     "frozen_back_data",
     "high_tourism",
     "large_version_gap_pts",
+    "version_gap_note",
 ]
 
 
@@ -118,6 +120,15 @@ def compute_shares(data, source, iso3_lookup):
     # is, so take the category's flag and fall back to the total's.
     result["flag"] = result["flag"].fillna(result["total_flag"])
 
+    # Essentials share: food + housing & utilities as a % of total spending.
+    # It belongs to the country-year, not to one category, so the same value
+    # is repeated on the food row and the housing row. min_count=2: if either
+    # category is missing, the sum is missing too (not just the other one).
+    essentials = result.groupby(["country_code", "year"])["spending_mnac"].sum(min_count=2)
+    essentials = essentials.rename("essentials_mnac").reset_index()
+    result = result.merge(essentials, on=["country_code", "year"], how="left")
+    result["essentials_share"] = result["essentials_mnac"] / result["total_mnac"] * 100
+
     # Frozen back-data: keep the published values, but no share.
     frozen = []
     for country, year in zip(result["country_code"], result["year"]):
@@ -125,6 +136,7 @@ def compute_shares(data, source, iso3_lookup):
     result["frozen_back_data"] = frozen
     result.loc[result["frozen_back_data"], "share_pct"] = None
     result.loc[result["frozen_back_data"], "imputed_rent_share_pct"] = None
+    result.loc[result["frozen_back_data"], "essentials_share"] = None
 
     result["diff_vs_eurostat"] = result["share_pct"] - result["eurostat_pc_tot"]
     result["high_tourism"] = result["iso3"].isin(HIGH_TOURISM_ISO3)
@@ -132,8 +144,18 @@ def compute_shares(data, source, iso3_lookup):
     # Footnote: largest COICOP 1999-vs-2018 gap for this country and measure,
     # where it reaches 4+ points (empty otherwise).
     gaps = []
+    notes = []
     for iso3, code in zip(result["iso3"], result["coicop"]):
-        gaps.append(LARGE_VERSION_GAPS.get((iso3, code)))
+        gap = LARGE_VERSION_GAPS.get((iso3, code))
+        gaps.append(gap)
+        if gap is None:
+            notes.append(None)
+        else:
+            notes.append(
+                f"Older (COICOP 1999) and current (COICOP 2018) figures for this "
+                f"country differ by up to {gap:.1f} points (gap measured up to 2022)."
+            )
     result["large_version_gap_pts"] = gaps
+    result["version_gap_note"] = notes
 
     return result[COLUMN_ORDER]

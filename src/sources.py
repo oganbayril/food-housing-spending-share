@@ -65,6 +65,34 @@ def download_oecd(dataflow, key, filename, start_year=None, end_year=None):
     return pd.read_csv(path)
 
 
+def download_worldbank(indicator, filename, start_year, end_year):
+    """Download a World Bank indicator for all countries as a DataFrame.
+
+    The World Bank API returns JSON: [page info, list of observations]. One
+    page of 20,000 rows is enough for all countries over ~30 years; the
+    function stops if that ever stops being true rather than miss data.
+    """
+    url = (
+        f"https://api.worldbank.org/v2/country/all/indicator/{indicator}"
+        f"?format=json&per_page=20000&date={start_year}:{end_year}"
+    )
+    path = _download(url, filename)
+    page_info, observations = pd.read_json(path, typ="series")
+    if page_info["pages"] != 1:
+        raise ValueError("World Bank response has more than one page")
+
+    rows = []
+    for obs in observations:
+        rows.append(
+            {
+                "iso3": obs["countryiso3code"],
+                "year": int(obs["date"]),
+                "value": obs["value"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def save_check(df, filename):
     """Save the output of an investigation to data/processed/checks/."""
     CHECKS_DIR.mkdir(parents=True, exist_ok=True)

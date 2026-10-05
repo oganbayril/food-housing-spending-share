@@ -277,6 +277,74 @@ Checks fixed in advance (results in the next section):
      essentials version gap from 2020 onwards; for the UK, plus its largest
      Eurostat-vs-OECD essentials difference (D12).
 
+### D15. Tier check results (thresholds unchanged, still provisional)
+*Script: `src/analyze_essentials.py` (run after D14 was committed)*
+
+**1. Distribution.** 2024: 44 countries, median 36.8%, middle half
+33.8-39.9%, range 25.4% (USA) to 50.2% (Romania). All map years (1,361
+country-years): median 37.1%, range 24.6-61.9%; the highest values are from
+the 1990s-2000s in Central and Eastern Europe.
+
+| Tier | 2024 countries | All years (country-years) |
+|---|---|---|
+| Lower (<35%) | 14 (32%) | 497 (37%) |
+| Moderate (35-45%) | 27 (61%) | 709 (52%) |
+| Higher (>=45%) | 3 (7%) | 155 (11%) |
+
+Stop rule (more than 70% in one tier in 2024): **not triggered** (61%).
+Observations, not acted on:
+- The 35% line sits at the peak of the distribution: 20 of 44 countries are
+  between 32.5% and 37.5% in 2024, and 6 are within 1 point of 35%
+  (PRT 34.2, CAN 35.0, BEL 35.2, IRL 35.5, CHE 35.8, LVA 35.9). Small
+  differences move countries across it.
+- The "higher" tier is thin in 2024 (CZE 45.7, SVK 47.4, ROU 50.2), and two
+  of the three (Czechia, Romania) carry the largest version-gap footnotes
+  (D13): their housing shares are the least certain. Czechia is 0.7 points
+  above the line.
+
+**2. Rank correlation with the housing cost overburden rate** (36 European
+countries, 2003-2024, 662 country-years): weak and positive.
+
+| Measure | pooled rho | 2024 rho (n=30) | yearly rho, median (range) |
+|---|---|---|---|
+| essentials_share | 0.28 | 0.30 | 0.33 (0.11 to 0.47) |
+| housing_share | 0.24 | 0.14 | 0.21 (0.07 to 0.46) |
+| food_share | 0.07 | 0.03 | 0.06 (-0.16 to 0.56) |
+
+The direction is as expected, but the tiers do not track overburden
+closely. Known reasons the two measures differ: the overburden rate
+compares actual housing costs with disposable income and **excludes imputed
+rent**; it counts people above a 40% cut-off (the tail), whereas
+essentials_share is an average share of spending. So the tiers must not be
+described as an affordability or overburden measure.
+
+**3. Rank correlation with GDP per capita (PPP)** (all 49 countries,
+1995-2024):
+
+| Measure | pooled rho | 2024 rho (n=44) | yearly rho, median (range) |
+|---|---|---|---|
+| essentials_share | -0.43 | -0.43 | -0.62 (-0.72 to -0.38) |
+| housing_share | +0.43 | +0.50 | +0.50 (+0.11 to +0.58) |
+| food_share | -0.74 | -0.92 | -0.92 (-0.94 to -0.83) |
+
+Food falls strongly with income (as expected), housing rises with it, and
+the two partly cancel in essentials_share. The tiers therefore partly
+reflect income level (through food), and less than food alone would.
+
+**4. Boundary checks.**
+- Type 1 (tier differs between COICOP versions): **55 of 872** overlapping
+  country-years (6%), 1995-2024. Most: Bosnia (14), Germany (9, 2002-2015),
+  Latvia (6), Montenegro (6), Romania (6, 2016-2022), Netherlands (4).
+  Czechia 2021-2022 is among them.
+- Type 2 (no observable version gap, within the margin of a threshold):
+  margin as fixed in D14 = 90th percentile of the essentials version gap
+  from 2020 = **2.98 points** (UK: 2.98 + 0.86 = 3.84). **217 of 417**
+  country-years of the 16 countries concerned fall within it; in 2024:
+  AUS 33.9, CAN 35.0, CHL 37.1, COL 36.6, GBR 36.2, ISL 36.9, JPN 43.0.
+  The margin is wide because the 90th percentile is driven by the few
+  countries with large gaps (median gap from 2020 is only 0.55 points).
+  For context only: within 0.55 points, 36 of 417; within 1 point, 69.
+
 ## Missing values (both sources, 1995-2024)
 *Script: `src/check_missing_values.py`*
 

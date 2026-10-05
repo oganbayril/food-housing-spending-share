@@ -1,0 +1,4 @@
+measure,vs,pooled_rho,rho_2024,n_2024,yearly_rho_median,yearly_rho_min,yearly_rho_max,n_years
+essentials_share,gdp_per_capita_ppp,-0.43,-0.43,44,-0.62,-0.72,-0.38,30
+housing_share,gdp_per_capita_ppp,0.43,0.5,44,0.5,0.11,0.58,30
+food_share,gdp_per_capita_ppp,-0.74,-0.92,44,-0.92,-0.94,-0.83,30

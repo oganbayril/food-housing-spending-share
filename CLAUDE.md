@@ -73,7 +73,8 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
 - [x] Step 4b: OECD for non-EU members; combined file `data/processed/shares.csv`
 - [x] UK switched to OECD for its whole series (DATA_NOTES D12); hover footnotes
   for 4+ pt version gaps (D13). README has a "Data caveats" section (UK only so far).
-- [ ] Next: set tier thresholds, then run `src/tier_checks.py` functions. No plotting yet.
+- [x] essentials_share added; provisional tiers 35/45 checked (DATA_NOTES D14, D15).
+- [ ] Next: user decides on thresholds given D15. No plotting yet.
 
 Pipeline order: `load_eurostat.py` -> `load_oecd.py` -> `combine_sources.py`
 -> `check_missing_values.py` (all in `src/`, run with `uv run python`).
