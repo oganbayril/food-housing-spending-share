@@ -24,7 +24,14 @@ import math
 import pandas as pd
 
 from country_codes import EUROSTAT_AGGREGATES, EUROSTAT_TO_ISO3
-from decisions import FIRST_YEAR, MAP_DEFAULT_YEAR, MAP_LAST_YEAR, TIER_LABELS, TIER_THRESHOLDS
+from decisions import (
+    FIRST_YEAR,
+    MAP_DEFAULT_YEAR,
+    MAP_LAST_YEAR,
+    NEAR_BOUNDARY_MARGIN,
+    TIER_LABELS,
+    TIER_THRESHOLDS,
+)
 from sources import CHECKS_DIR, PROCESSED_DIR, download_eurostat, download_worldbank, save_check
 from tier_checks import assign_tier, find_near_boundary, find_tier_disagreements
 
@@ -246,11 +253,13 @@ def report_boundaries(table):
 
     # Type 1: does the COICOP version change the tier?
     disagreements = find_tier_disagreements(overlap, "essentials", TIER_THRESHOLDS)
+    same_tier_pct = (1 - len(disagreements) / len(overlap)) * 100
     print(
-        f"\nType 1: tier differs between COICOP 1999 and 2018 in "
-        f"{len(disagreements)} of {len(overlap)} overlapping country-years "
-        f"({overlap['year'].min()}-{overlap['year'].max()})."
+        f"\nType 1 headline: {same_tier_pct:.1f}% of overlapping country-years keep the "
+        f"same tier across COICOP versions ({len(overlap) - len(disagreements)} of "
+        f"{len(overlap)}, {overlap['year'].min()}-{overlap['year'].max()})."
     )
+    print(f"Tier differs in {len(disagreements)} country-years:")
     if len(disagreements) > 0:
         summary = disagreements.groupby("geo")["year"].agg(["count", "min", "max"])
         print(summary.to_string())
@@ -272,6 +281,8 @@ def report_boundaries(table):
     unobserved = table[~table["iso3"].isin(observed)]
     print(f"\nType 2: countries with no observable version gap: {', '.join(sorted(unobserved['iso3'].unique()))}")
 
+    # Pre-registered margin (D14), reported as run.
+    print(f"\nType 2, PRE-REGISTERED margin ({margin:.2f} points; UK {margin + uk_extra:.2f}):")
     frames = []
     for iso3, group in unobserved.groupby("iso3"):
         country_margin = margin
@@ -279,16 +290,29 @@ def report_boundaries(table):
             country_margin = margin + uk_extra
         frames.append(find_near_boundary(group, "essentials_share", TIER_THRESHOLDS, country_margin))
     near = pd.concat(frames)
-    print(f"{len(near)} of {len(unobserved)} country-years lie within the margin of a threshold.")
-    if len(near) > 0:
-        summary = near.groupby("iso3")["year"].agg(["count", "min", "max"])
-        print(summary.to_string())
-        latest = near[near["year"] == MAP_DEFAULT_YEAR]
-        listing = []
-        for iso3, share in zip(latest["iso3"], latest["essentials_share"]):
-            listing.append(f"{iso3} {share:.1f}")
-        print(f"In {MAP_DEFAULT_YEAR}: {', '.join(listing) if listing else 'none'}")
+    report_near(near, len(unobserved))
     save_check(near, "boundary_type2_near_threshold.csv")
+
+    # Post-hoc margin (D16), chosen after seeing the result above. Applied to
+    # ALL countries, because it drives the near_tier_boundary hover flag.
+    print(f"\nType 2, POST-HOC margin (+/-{NEAR_BOUNDARY_MARGIN} point, all countries):")
+    near_posthoc = find_near_boundary(table, "essentials_share", TIER_THRESHOLDS, NEAR_BOUNDARY_MARGIN)
+    report_near(near_posthoc, len(table))
+    save_check(near_posthoc, "boundary_near_threshold_posthoc_1pt.csv")
+
+
+def report_near(near, n_total):
+    """Print how many country-years are near a threshold, and which in 2024."""
+    print(f"{len(near)} of {n_total} country-years lie within the margin of a threshold.")
+    if len(near) == 0:
+        return
+    summary = near.groupby("iso3")["year"].agg(["count", "min", "max"])
+    print(summary.to_string())
+    latest = near[near["year"] == MAP_DEFAULT_YEAR]
+    listing = []
+    for iso3, share in zip(latest["iso3"], latest["essentials_share"]):
+        listing.append(f"{iso3} {share:.1f}")
+    print(f"In {MAP_DEFAULT_YEAR}: {', '.join(listing) if listing else 'none'}")
 
 
 def main():

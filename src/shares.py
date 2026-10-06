@@ -18,6 +18,8 @@ from decisions import (
     FIRST_YEAR,
     HIGH_TOURISM_ISO3,
     LARGE_VERSION_GAPS,
+    NEAR_BOUNDARY_MARGIN,
+    TIER_THRESHOLDS,
     is_frozen,
 )
 
@@ -38,6 +40,7 @@ COLUMN_ORDER = [
     "total_mnac",
     "share_pct",
     "essentials_share",
+    "near_tier_boundary",
     "imputed_rent_share_pct",
     "eurostat_pc_tot",
     "diff_vs_eurostat",
@@ -137,6 +140,18 @@ def compute_shares(data, source, iso3_lookup):
     result.loc[result["frozen_back_data"], "share_pct"] = None
     result.loc[result["frozen_back_data"], "imputed_rent_share_pct"] = None
     result.loc[result["frozen_back_data"], "essentials_share"] = None
+
+    # Near a tier boundary: essentials_share within NEAR_BOUNDARY_MARGIN
+    # points of a threshold (post-hoc margin, D16). Empty share -> False.
+    near = []
+    for share in result["essentials_share"]:
+        is_near = False
+        if pd.notna(share):
+            for threshold in TIER_THRESHOLDS:
+                if abs(share - threshold) <= NEAR_BOUNDARY_MARGIN:
+                    is_near = True
+        near.append(is_near)
+    result["near_tier_boundary"] = near
 
     result["diff_vs_eurostat"] = result["share_pct"] - result["eurostat_pc_tot"]
     result["high_tourism"] = result["iso3"].isin(HIGH_TOURISM_ISO3)

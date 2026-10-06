@@ -67,10 +67,16 @@ MAP_LAST_YEAR = 2024
 MAP_DEFAULT_YEAR = 2024
 
 # Tier thresholds for essentials_share (food + housing & utilities as a % of
-# total spending). PROVISIONAL; rationale in DATA_NOTES.md (D14). A share at
-# or above a threshold moves up a tier.
+# total spending). Rationale in DATA_NOTES.md (D14); kept unchanged after the
+# checks (D15, D16). A share at or above a threshold moves up a tier.
 TIER_THRESHOLDS = [35, 45]
 TIER_LABELS = ["Lower", "Moderate", "Higher"]
+
+# Countries within this many points of a threshold get a "near a tier
+# boundary" hover flag (near_tier_boundary column). POST-HOC: chosen after
+# seeing the D15 results, because the pre-registered margin (2.98 points)
+# flagged about half of the country-years it was applied to. See D16.
+NEAR_BOUNDARY_MARGIN = 1.0
 
 # Category labels. Housing says "incl. imputed rent" because about half of it,
 # in most countries, is rent that owner-occupiers do not actually pay.

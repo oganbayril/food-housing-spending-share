@@ -345,6 +345,65 @@ reflect income level (through food), and less than food alone would.
   countries with large gaps (median gap from 2020 is only 0.55 points).
   For context only: within 0.55 points, 36 of 417; within 1 point, 69.
 
+### D16. Thresholds kept; post-hoc "near a boundary" margin of 1 point
+*Decided after seeing D15.*
+
+**Thresholds stay at 35% and 45%** (lower / moderate / higher).
+- The pre-registered stop rule was not triggered (largest tier in 2024:
+  61%, limit 70%).
+- The 35% line sits on the density peak (D15), so small differences move
+  countries across it. This is handled **in the presentation, not by moving
+  the cut-offs**: moving them after seeing the data would fit them to the
+  results, and any line placed inside a unimodal distribution has the same
+  problem somewhere.
+
+**Boundary margins**
+- The **pre-registered Type 2 result stands as run** (D15): margin 2.98
+  points (UK 3.84), 217 of 417 country-years flagged. It is reported, not
+  replaced.
+- A **second margin of +/-1 point, labelled post-hoc** (chosen after seeing
+  that the pre-registered margin flagged about half of the country-years it
+  was applied to). It drives the `near_tier_boundary` column and the hover
+  flag, for all countries: **252 of 1,361 country-years**; in 2024 seven
+  countries: BEL 35.2, CAN 35.0, CHE 35.8, IRL 35.5, LVA 35.9, PRT 34.2,
+  CZE 45.7. (`NEAR_BOUNDARY_MARGIN` in `decisions.py`.)
+
+**Type 1 headline:** **93.7% of overlapping country-years keep the same
+tier across COICOP versions** (817 of 872, 1995-2024).
+
+### D17. Outliers from the income trend (candidates for the README)
+*Script: `src/find_outliers.py`*
+
+Method: each year from 2015 to 2024, fit `share = a + b * log(GDP per capita,
+PPP)` across countries; residual = actual share minus the share predicted
+for the country's income level. Robustness: mean residual over 2015-2024 and
+the number of years (of 10) a country is among the 5 largest deviations.
+Fit: R-squared about 0.77 for food (income explains most of it) but only
+about 0.31 for housing, so housing "outliers" are measured against a weak
+trend.
+
+Largest deviations in 2024 (percentage points):
+
+| Country | Measure | Share | Residual 2024 | Mean 2015-24 | Years in top 5 | Caveat |
+|---|---|---|---|---|---|---|
+| Czechia | housing | 31.9 | +10.4 | +8.7 | 10 | version gap up to 6.9 pts (D13) |
+| Slovakia | housing | 27.6 | +7.5 | +8.5 | 10 | none |
+| Finland | housing | 29.4 | +7.0 | +6.4 | 7 | none |
+| Malta | housing | 15.0 | -8.0 | -7.8 | 8 | tourism effect likely but not measured (L2) |
+| Romania | food | 23.1 | +5.9 | +5.8 | 8 | none for food (housing has a version gap) |
+| UK | food | 9.1 | -5.2 | -4.9 | 8 | OECD source, +0.5-0.9 pt source gap (D12) |
+| Colombia | food | 22.6 | -4.0 | -6.6 | 7 | none for food |
+
+**Excluded as GDP artefacts, not spending differences:** Luxembourg (food
++5.9, housing -8.9) and Ireland (food +5.1). Both have GDP per capita that
+overstates residents' income (Luxembourg: many cross-border commuters
+counted in GDP but not in the resident population; Ireland: profits of
+multinational companies). Luxembourg also carries the tourism caveat.
+
+Czechia stays a candidate despite its version gap: even subtracting the full
+6.9-point gap would leave it above the income trend, but the README should
+mention the caveat.
+
 ## Missing values (both sources, 1995-2024)
 *Script: `src/check_missing_values.py`*
 
