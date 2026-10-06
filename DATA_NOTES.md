@@ -491,8 +491,22 @@ shape on the map **includes Kosovo's territory** (Serbia's fill reaches the
 Albanian and North Macedonian borders). So on the map, Kosovo's area shows
 **Serbia's colour and hover**, not Kosovo's own figures. Kosovo's data
 (2008-2017) stays in `shares.csv`; the page says so in its notes. Fixing this
-would need a custom base map (GeoJSON with a Kosovo shape), not done for the
-draft.
+would need a custom base map (GeoJSON with a Kosovo shape); decided against
+(documented limitation instead).
+
+Safeguards (`src/build_map.py`):
+- Kosovo rows are never sent to the map (`NOT_MAPPABLE`), so they cannot
+  change any colour or hover.
+- `check_kosovo_isolated()` runs on every build and stops it unless, in all
+  30 years, `XKX` is absent from every frame and Serbia appears exactly once
+  with its own tier and its own hover.
+- Serbia's hover says that its shape also covers Kosovo and that Kosovo's
+  figures are not shown.
+- Side effect found by the colour check: with Kosovo removed, 2018-2021 have
+  no "No data" country. Every frame now carries all four tiers (an empty one
+  where needed), otherwise the previous year's grey countries would have
+  stayed on screen. In those years the "No data" legend entry is hidden by
+  Plotly because it is empty.
 
 ### L3. Provisional and revised data
 Recent years are often provisional (D6), and the version comparison (D2) shows
