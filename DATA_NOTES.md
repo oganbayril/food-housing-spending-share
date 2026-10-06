@@ -404,6 +404,42 @@ Czechia stays a candidate despite its version gap: even subtracting the full
 6.9-point gap would leave it above the income trend, but the README should
 mention the caveat.
 
+### D18. README outliers: the five chosen, and why four were left out
+*Chosen from the D17 candidates.*
+
+**Chosen** (consistently far from the income trend, 2015-2024, and any
+caveat is smaller than the deviation):
+
+| Country | Pattern | Residual 2024 / mean 2015-24 | Years in top 5 (of 10) | Caveat to mention |
+|---|---|---|---|---|
+| Slovakia | housing above trend | +7.5 / +8.5 | 10 | none |
+| Finland | housing above trend | +7.0 / +6.4 | 7 | none |
+| Czechia | housing above trend | +10.4 / +8.7 | 10 | version gap up to 6.9 pts; still above trend without it |
+| Romania | food above trend | +5.9 / +5.8 | 8 | none for food |
+| UK | food below trend | -5.2 / -4.9 | 8 | OECD source; 0.5-0.9 pt source gap, much smaller than the deviation |
+
+When presenting housing outliers, say that income explains only about 31%
+of cross-country differences in housing share (vs about 77% for food), so
+"above the income trend" is a weaker statement for housing.
+
+**Excluded**
+- **Luxembourg** (food +5.9, housing -8.9): an artefact of GDP, not of
+  spending. Its GDP per capita overstates residents' income because many
+  workers commute from neighbouring countries: their output is in GDP but
+  they are not in the resident population. Also carries the tourism caveat
+  (L2), which lowers its shares.
+- **Ireland** (food +5.1): also a GDP artefact. Profits of multinational
+  companies inflate GDP per capita well above residents' income. And it is
+  in the top 5 in only 2 of 10 years, so it is not consistent.
+- **Malta** (housing -8.0, 8 of 10 years): consistent, but tourism very
+  likely lowers its shares (a large tourism sector) and the effect could not
+  be measured, because Malta is not in the OECD table used in L2. Its
+  deviation may be partly or wholly that.
+- **Colombia** (food -4.0; mean -6.6, 7 of 10 years): a reasonable substitute
+  but not chosen. It is the only non-European, non-high-income candidate, it
+  has data only from 2005, and it is outside the European focus where the
+  rest of the analysis (overburden validation, tourism check) applies.
+
 ## Missing values (both sources, 1995-2024)
 *Script: `src/check_missing_values.py`*
 
