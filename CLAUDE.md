@@ -75,7 +75,8 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
   for 4+ pt version gaps (D13). README has a "Data caveats" section (UK only so far).
 - [x] essentials_share added; provisional tiers 35/45 checked (DATA_NOTES D14, D15).
 - [x] Thresholds kept (D16); near_tier_boundary column (post-hoc 1 pt); outlier candidates (D17).
-- [ ] Next: the Plotly map (awaiting go-ahead).
+- [x] Draft map: `src/build_map.py` -> `site/index.html` + `images/map_2024.png` (not deployed).
+- [ ] Next: user reviews the draft map.
 
 Pipeline order: `load_eurostat.py` -> `load_oecd.py` -> `combine_sources.py`
 -> `check_missing_values.py` (all in `src/`, run with `uv run python`).

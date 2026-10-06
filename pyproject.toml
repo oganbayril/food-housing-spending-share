@@ -5,6 +5,7 @@ description = "Share of household spending on food and housing & utilities acros
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "kaleido>=1.5.0",
     "pandas>=3.0.6",
     "plotly>=7.1.0",
     "requests>=2.34.2",

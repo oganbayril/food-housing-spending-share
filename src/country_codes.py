@@ -66,6 +66,23 @@ OECD_MEMBERS_ISO3 = {
     "NZL", "POL", "PRT", "SVK", "SVN", "SWE", "TUR", "USA",
 }
 
+# Display names for the map hover, by ISO-3. Short common English names.
+ISO3_NAMES = {
+    "ALB": "Albania", "AUS": "Australia", "AUT": "Austria", "BEL": "Belgium",
+    "BGR": "Bulgaria", "BIH": "Bosnia and Herzegovina", "CAN": "Canada",
+    "CHE": "Switzerland", "CHL": "Chile", "COL": "Colombia", "CRI": "Costa Rica",
+    "CYP": "Cyprus", "CZE": "Czechia", "DEU": "Germany", "DNK": "Denmark",
+    "ESP": "Spain", "EST": "Estonia", "FIN": "Finland", "FRA": "France",
+    "GBR": "United Kingdom", "GRC": "Greece", "HRV": "Croatia", "HUN": "Hungary",
+    "IRL": "Ireland", "ISL": "Iceland", "ISR": "Israel", "ITA": "Italy",
+    "JPN": "Japan", "KOR": "South Korea", "LTU": "Lithuania", "LUX": "Luxembourg",
+    "LVA": "Latvia", "MEX": "Mexico", "MKD": "North Macedonia", "MLT": "Malta",
+    "MNE": "Montenegro", "NLD": "Netherlands", "NOR": "Norway",
+    "NZL": "New Zealand", "POL": "Poland", "PRT": "Portugal", "ROU": "Romania",
+    "SRB": "Serbia", "SVK": "Slovakia", "SVN": "Slovenia", "SWE": "Sweden",
+    "TUR": "Türkiye", "USA": "United States", "XKX": "Kosovo",
+}
+
 # Eurostat also publishes regional aggregates (EU, euro area). They are not
 # countries, so they are excluded from the country-level data.
 EUROSTAT_AGGREGATES = {"EU27_2020", "EA", "EA12", "EA19", "EA20", "EA21"}

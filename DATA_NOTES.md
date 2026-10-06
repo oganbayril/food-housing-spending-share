@@ -484,6 +484,16 @@ Greece 27.7%, Portugal 27.6%, Luxembourg 27.3%, Iceland 26.5%, Spain 26.4%.
 An upper bound for food (tourists do buy food). Malta and Cyprus are probably
 affected but not in the OECD table. 2022 only.
 
+### L4. Kosovo cannot be shown on the map
+Plotly's built-in world maps (110m and 50m resolution) have no Kosovo shape
+with a country code (`XKX` or any other). Checked by rendering: Serbia's
+shape on the map **includes Kosovo's territory** (Serbia's fill reaches the
+Albanian and North Macedonian borders). So on the map, Kosovo's area shows
+**Serbia's colour and hover**, not Kosovo's own figures. Kosovo's data
+(2008-2017) stays in `shares.csv`; the page says so in its notes. Fixing this
+would need a custom base map (GeoJSON with a Kosovo shape), not done for the
+draft.
+
 ### L3. Provisional and revised data
 Recent years are often provisional (D6), and the version comparison (D2) shows
 that revisions can move shares by several points.
