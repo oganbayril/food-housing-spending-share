@@ -55,6 +55,9 @@ cp -a /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$STAMP
 caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-before-$STAMP.json
 ```
 
+Run phases B and C in the same SSH session: `$STAMP` is used again in phase C
+(or note its value and set it again).
+
 Also copy the backup off the server (from the local machine):
 
 ```bash
@@ -130,14 +133,15 @@ Until that change is deployed: **do not re-run the real-estate `setup.sh`**
    ssh root@<host> "mkdir -p /srv/food-housing-share && chmod 755 /srv/food-housing-share"
    scp site/index.html site/shares.csv root@<host>:/srv/food-housing-share/
    ssh root@<host> "chmod 644 /srv/food-housing-share/*"
+   scp deploy/food-housing.caddy root@<host>:/root/food-housing.caddy
    ```
 
    Caddy only needs to read these files; nothing on the server writes them.
 3. Site config, on the server:
 
    ```bash
-   sed "s/FOODHOUSING_DOMAIN/<the real hostname>/" food-housing.caddy \
-     > /etc/caddy/sites/food-housing.caddy        # template: deploy/food-housing.caddy
+   sed "s/FOODHOUSING_DOMAIN/<the real hostname>/" /root/food-housing.caddy \
+     > /etc/caddy/sites/food-housing.caddy
    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
    systemctl reload caddy
    ```
