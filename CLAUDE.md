@@ -76,7 +76,8 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
 - [x] essentials_share added; provisional tiers 35/45 checked (DATA_NOTES D14, D15).
 - [x] Thresholds kept (D16); near_tier_boundary column (post-hoc 1 pt); outlier candidates (D17).
 - [x] Draft map: `src/build_map.py` -> `site/index.html` + `images/map_2024.png` (not deployed).
-- [ ] Next: user reviews the draft map.
+- [x] Map reviewed; Kosovo isolated, dark mode, caption, Europe PNG. README drafted.
+- [ ] Next: user reviews deploy/PLAN.md. Nothing on the VPS until approved.
 
 Pipeline order: `load_eurostat.py` -> `load_oecd.py` -> `combine_sources.py`
 -> `check_missing_values.py` (all in `src/`, run with `uv run python`).

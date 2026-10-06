@@ -1,0 +1,27 @@
+# Static site: food-housing-spending-share.
+# Installed as /etc/caddy/sites/food-housing.caddy, with FOODHOUSING_DOMAIN
+# replaced by the real DuckDNS hostname (see deploy/PLAN.md).
+# Caddy obtains and renews the TLS certificate itself.
+
+FOODHOUSING_DOMAIN {
+	root * /srv/food-housing-share
+	file_server
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# The data file downloads instead of opening as text.
+	@csv path /shares.csv
+	header @csv Content-Disposition "attachment; filename=shares.csv"
+
+	log {
+		output file /var/log/caddy/food-housing.log
+		format json
+	}
+}
