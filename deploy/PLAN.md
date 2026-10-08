@@ -1,170 +1,131 @@
-# Deployment plan (not run yet)
+# Deployment plan
 
 Goal: serve `site/index.html` and `site/shares.csv` as a static site from the
-existing Hetzner VPS with Caddy, next to the germany-real-estate API, without
-the two projects overwriting each other's Caddy configuration.
+existing Hetzner VPS (`89.167.25.74`) with Caddy, next to the other projects
+on the box, without any project overwriting another's Caddy configuration.
 
-**Status: plan only. Nothing below has been run on the VPS.** Each phase ends
-with a check and a rollback. Phases A-C change only how the existing
-real-estate site is configured, not what it serves; this site is added only in
-phase E, after the real-estate site has been confirmed working on the new
-layout.
+Hostname: `food-housing-spending-share.duckdns.org` (already resolves to the
+VPS IP).
 
-## Why the change is needed
+Each phase ends with a check and a rollback, and runs only after the owner
+confirms the previous one.
 
-The real-estate project's `deploy/setup.sh` writes the whole
-`/etc/caddy/Caddyfile` from its single-site template (line 81:
-`sed ... deploy/Caddyfile > /etc/caddy/Caddyfile`). Adding this site to that
-file would be erased the next time `setup.sh` runs. The fix: the main
-Caddyfile only imports one file per site from `/etc/caddy/sites/`, and each
-project owns its own file there.
+## What is on the server (phase A, 2026-10-08, read-only)
 
-## Before starting: decisions and inputs
+The VPS **already uses one file per site** (set up with the titris project
+on 2026-09-20), so the original plan to restructure into `sites/` was dropped:
 
-- **Hostname** for this site, registered at duckdns.org and pointed at the
-  VPS IP (same IP as `germany-real-estate.duckdns.org`). Placeholder below:
-  `FOODHOUSING_DOMAIN`. To be chosen by the owner.
-- SSH access as used for the real-estate deploy (`ssh root@<host>`).
-- A quiet time window: a Caddy reload is graceful, but phase C is where a
-  mistake would affect the live API.
+| File | Contents |
+|---|---|
+| `/etc/caddy/Caddyfile` | only `import sites-enabled/*` |
+| `sites-enabled/00-existing.conf` | germany-real-estate.duckdns.org (reverse proxy to :8000) |
+| `sites-enabled/titris.conf` | titris.duckdns.org (static build + API on :8001) |
+| `Caddyfile.bak.1789863171` | the old single-site Caddyfile (= `00-existing.conf`) |
 
-## Phase A: look, don't touch (read-only)
+Caddy v2.11.4, running since 2026-09-20; real-estate `/health` 200; certificate
+(Let's Encrypt) valid to 2026-12-02. `/srv` empty.
 
-```bash
-ssh root@<host>
-caddy version
-ls -la /etc/caddy/
-cat /etc/caddy/Caddyfile                      # expect the single real-estate block
-systemctl status caddy --no-pager
-journalctl -u caddy --since "1 hour ago" --no-pager | tail -20
-curl -s https://germany-real-estate.duckdns.org/health
-# note the current certificate's issuer and expiry, to compare later
-echo | openssl s_client -connect germany-real-estate.duckdns.org:443 \
-  -servername germany-real-estate.duckdns.org 2>/dev/null | openssl x509 -noout -issuer -enddate
-```
+**Risk found:** the real-estate `deploy/setup.sh` still writes the whole
+`/etc/caddy/Caddyfile` from its single-site template. Re-running it would
+remove the `import` line and take **titris** (and later this site) offline.
+Phase D fixes that. Until then: do not re-run the real-estate `setup.sh`
+(`update.sh` is safe; it does not touch Caddy).
 
-Stop here if the Caddyfile is not what the real-estate template would produce
-(someone edited it by hand): adjust the plan first.
-
-## Phase B: back up
+## Phase B: back up (done 2026-10-08)
 
 ```bash
-STAMP=$(date +%Y%m%d-%H%M)
-cp -a /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$STAMP
-# the "before" config as Caddy's JSON, for the equivalence check in phase C
+STAMP=20261008-2258
+tar -czf /root/caddy-backup-$STAMP.tar.gz -C /etc caddy
 caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-before-$STAMP.json
 ```
 
-Run phases B and C in the same SSH session: `$STAMP` is used again in phase C
-(or note its value and set it again).
+Both files downloaded to `C:\Users\Ogi\caddy-backups\` (checksums match).
+The "before" JSON is produced with `caddy adapt` from the files on disk, the
+same way as the "after" JSON in phase C, so the comparison is like for like.
 
-Also copy the backup off the server (from the local machine):
+## Phase C: rename `00-existing.conf` to `realestate.conf`
 
-```bash
-scp root@<host>:/etc/caddy/Caddyfile.bak-* ./caddy-backups/
-```
+Gives the real-estate repo a clearly named file to own (phase D). Import
+order is unchanged: Caddy imports `sites-enabled/*` alphabetically, and both
+`00-existing.conf` and `realestate.conf` sort before `titris.conf`.
 
-## Phase C: move to one file per site (real-estate only)
-
-```bash
-mkdir -p /etc/caddy/sites
-# the current block, unchanged, becomes the real-estate site file
-cp /etc/caddy/Caddyfile /etc/caddy/sites/realestate.caddy
-# the main Caddyfile now only imports the site files
-printf 'import sites/*.caddy\n' > /etc/caddy/Caddyfile
-```
-
-Check before reloading:
+Gate: reload only if `caddy validate` passes **and** the adapted JSON is
+identical to the phase B "before"; otherwise the rename is undone, no reload.
 
 ```bash
-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-# the new layout must produce EXACTLY the same running config as before
-caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-after.json
-diff <(python3 -m json.tool --sort-keys /root/caddy-before-$STAMP.json) \
-     <(python3 -m json.tool --sort-keys /root/caddy-after.json) && echo "IDENTICAL"
+set -e
+STAMP=20261008-2258
+cd /etc/caddy/sites-enabled
+mv 00-existing.conf realestate.conf
+if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
+   && caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-after.json \
+   && diff <(python3 -m json.tool --sort-keys /root/caddy-before-$STAMP.json) \
+           <(python3 -m json.tool --sort-keys /root/caddy-after.json); then
+  echo "IDENTICAL -> reloading"; systemctl reload caddy
+else
+  echo "NOT identical or invalid -> reverting rename, no reload"; mv realestate.conf 00-existing.conf; exit 1
+fi
 ```
 
-Only if validation passes **and** the diff says IDENTICAL:
+Check afterwards: real-estate `/health` 200, same certificate; titris 200;
+no errors in `journalctl -u caddy`.
 
-```bash
-systemctl reload caddy
-```
+Rollback: `mv realestate.conf 00-existing.conf && systemctl reload caddy`
+(or restore the phase B tarball).
 
-(If a reload is given an invalid config, Caddy rejects it and keeps running
-the old one; the `validate` step is there so it never gets that far.)
+## Phase D: real-estate `setup.sh` stops overwriting the main Caddyfile
 
-**Test the real-estate site** on the new layout:
+A separate commit in the **germany-real-estate-api** repo:
+- `setup.sh` writes `/etc/caddy/sites-enabled/realestate.conf` instead of
+  `/etc/caddy/Caddyfile`;
+- it creates `/etc/caddy/Caddyfile` with `import sites-enabled/*` only if
+  that file does not exist, so other projects' sites are never touched;
+- `deploy/README.md` updated to match.
 
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://germany-real-estate.duckdns.org/health   # 200
-curl -sI https://germany-real-estate.duckdns.org/docs | head -5                             # 200, HSTS header
-echo | openssl s_client -connect germany-real-estate.duckdns.org:443 \
-  -servername germany-real-estate.duckdns.org 2>/dev/null | openssl x509 -noout -issuer -enddate  # same as phase A
-journalctl -u caddy --since "10 min ago" --no-pager | grep -i -E "error|warn" || echo "no errors"
-```
-
-Then open the demo page in a browser and submit one prediction. Leave it
-running (e.g. a day) before phase E.
-
-**Rollback (phase C):**
-
-```bash
-cp -a /etc/caddy/Caddyfile.bak-$STAMP /etc/caddy/Caddyfile
-systemctl reload caddy
-```
-
-## Phase D: stop `setup.sh` from undoing phase C (real-estate repo)
-
-A change in the **germany-real-estate-api** repo, as its own commit there:
-`setup.sh` should write `/etc/caddy/sites/realestate.caddy` instead of
-`/etc/caddy/Caddyfile`, and create the main Caddyfile with the `import` line
-only if it does not exist yet. Update its `deploy/README.md` to match.
-
-Until that change is deployed: **do not re-run the real-estate `setup.sh`**
-(`update.sh` is safe; it does not touch Caddy).
+Tested locally, not on the VPS: generate the file to a temporary path with the
+same `sed` and diff it against the live `realestate.conf`.
 
 ## Phase E: add this site
 
-1. DuckDNS: register `FOODHOUSING_DOMAIN`, point it at the VPS IP, and check
-   from the local machine: `nslookup FOODHOUSING_DOMAIN`.
-2. Files (from the local machine, after `uv run python src/build_map.py`):
+1. Files, from the local machine, after `uv run python src/build_map.py`:
 
    ```bash
-   ssh root@<host> "mkdir -p /srv/food-housing-share && chmod 755 /srv/food-housing-share"
-   scp site/index.html site/shares.csv root@<host>:/srv/food-housing-share/
-   ssh root@<host> "chmod 644 /srv/food-housing-share/*"
-   scp deploy/food-housing.caddy root@<host>:/root/food-housing.caddy
+   ssh root@89.167.25.74 "mkdir -p /srv/food-housing-share && chmod 755 /srv/food-housing-share"
+   scp site/index.html site/shares.csv root@89.167.25.74:/srv/food-housing-share/
+   ssh root@89.167.25.74 "chmod 644 /srv/food-housing-share/*"
+   scp deploy/food-housing.caddy root@89.167.25.74:/root/food-housing.caddy
    ```
 
-   Caddy only needs to read these files; nothing on the server writes them.
+2. **Before the reload:** check the response headers in
+   `deploy/food-housing.caddy` against what the page needs: its inline
+   scripts (Plotly and the page script) and the runtime fetch of the map
+   outlines from Plotly's CDN. A Content-Security-Policy, if added, must
+   allow both, and must be tested in a browser.
 3. Site config, on the server:
 
    ```bash
-   sed "s/FOODHOUSING_DOMAIN/<the real hostname>/" /root/food-housing.caddy \
-     > /etc/caddy/sites/food-housing.caddy
+   sed "s/FOODHOUSING_DOMAIN/food-housing-spending-share.duckdns.org/" /root/food-housing.caddy \
+     > /etc/caddy/sites-enabled/food-housing.conf
    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
    systemctl reload caddy
    ```
 
+   `food-housing.conf` sorts first alphabetically; each file is a different
+   domain, so order does not matter.
+
 4. Test:
 
    ```bash
-   curl -sI https://<the real hostname>/ | head -5                # 200, text/html, HSTS
-   curl -sI https://<the real hostname>/shares.csv | grep -i disposition   # attachment
-   curl -s -o /dev/null -w "%{http_code}\n" https://germany-real-estate.duckdns.org/health  # still 200
+   curl -sI https://food-housing-spending-share.duckdns.org/ | head -5        # 200, text/html, HSTS
+   curl -sI https://food-housing-spending-share.duckdns.org/shares.csv | grep -i disposition
+   curl -s -o /dev/null -w "%{http_code}\n" https://germany-real-estate.duckdns.org/health
+   curl -s -o /dev/null -w "%{http_code}\n" https://titris.duckdns.org/
    ```
 
-   Then in a browser: the map loads, the slider moves, hover works, dark mode
-   follows the system setting, World / Europe zoom works, the CSV downloads.
-   Caddy requests the certificate on the first request; if that fails, check
-   `journalctl -u caddy` (DNS not propagated yet is the usual cause).
+   Then in a browser: map loads, slider, hover, dark mode, World / Europe
+   zoom, CSV download.
 
-**Rollback (phase E):**
-
-```bash
-rm /etc/caddy/sites/food-housing.caddy
-systemctl reload caddy
-```
+Rollback: `rm /etc/caddy/sites-enabled/food-housing.conf && systemctl reload caddy`.
 
 ## Updating the site later
 
@@ -173,12 +134,11 @@ no Caddy reload is needed for static files:
 
 ```bash
 uv run python src/build_map.py
-scp site/index.html site/shares.csv root@<host>:/srv/food-housing-share/
+scp site/index.html site/shares.csv root@89.167.25.74:/srv/food-housing-share/
 ```
 
 ## Known follow-ups (not blocking)
 
 - The page loads the map outlines (`world_50m.json`) from Plotly's CDN at
   view time. Self-hosting that file would remove the only third-party request.
-- No Content-Security-Policy yet: Plotly's inline scripts would need a
-  policy tested in the browser before it is enabled.
+- titris is left as it is.

@@ -1,5 +1,5 @@
 # Static site: food-housing-spending-share.
-# Installed as /etc/caddy/sites/food-housing.caddy, with FOODHOUSING_DOMAIN
+# Installed as /etc/caddy/sites-enabled/food-housing.conf, with FOODHOUSING_DOMAIN
 # replaced by the real DuckDNS hostname (see deploy/PLAN.md).
 # Caddy obtains and renews the TLS certificate itself.
 
