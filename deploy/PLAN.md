@@ -153,7 +153,9 @@ CONF=/etc/caddy/sites-enabled/food-housing.conf
 [ ! -e "$CONF" ] || { echo "$CONF already exists, stopping"; exit 1; }
 caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-before-e.json
 sed "s/FOODHOUSING_DOMAIN/$DOMAIN/" /root/food-housing.caddy > "$CONF"
-if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile    && caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-after-e.json    && python3 /root/check_caddy_change.py /root/caddy-before-e.json /root/caddy-after-e.json "$DOMAIN"; then
+if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
+   && caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-after-e.json \
+   && python3 /root/check_caddy_change.py /root/caddy-before-e.json /root/caddy-after-e.json "$DOMAIN"; then
   systemctl reload caddy; echo "reloaded"
 else
   rm -f "$CONF"; echo "check failed -> removed $CONF, no reload"; exit 1
