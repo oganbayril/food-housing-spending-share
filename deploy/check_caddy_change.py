@@ -1,20 +1,26 @@
 """Gate for adding a Caddy site: did anything about the EXISTING sites change?
 
 Usage (on the server, with JSON from `caddy adapt`):
-    python3 check_caddy_change.py before.json after.json <new-domain>
+    python3 check_caddy_change.py before.json after.json [new-domain]
 
 Passes (exit 0) only if:
   1. every site in BEFORE still exists in AFTER with an identical route
      (everything Caddy does for that host: headers, proxy, files, ...);
   2. every site in BEFORE still writes its access log with identical
      settings (same file, same format);
-  3. the only new site in AFTER is <new-domain>, with exactly one route;
+  3. the only new site in AFTER is <new-domain>, with exactly one route
+     (without <new-domain>: no new site at all, i.e. "nothing changed");
   4. nothing else at the top level changed (other apps, listen addresses).
 
-Why not a plain diff: Caddy numbers access logs by file order (log0, log1,
-...). A new file that sorts first renumbers the existing logs, so the raw
-JSON changes although nothing about the existing sites does. This compares
-per site, with log names resolved to their settings.
+Why not a plain diff: Caddy numbers some things by position in the WHOLE
+config, in file order: access logs (log0, log1, ...) and groups of mutually
+exclusive handlers (group0, group1, ...). A new file that sorts first shifts
+those numbers for every existing site, so the raw JSON changes although
+nothing about the existing sites does. This compares per site, with log
+names resolved to their settings and group labels renamed per site.
+
+Tests: python -m unittest discover deploy/tests (fixtures are real
+`caddy adapt` output from this project's phase C and phase E).
 
 Standard library only (runs with the server's python3).
 """
@@ -30,6 +36,37 @@ def load(path):
 
 def canonical(value):
     return json.dumps(value, sort_keys=True)
+
+
+def normalize_groups(route):
+    """Rename a route's auto-generated "group" labels in order of appearance.
+
+    Caddy names groups of mutually exclusive handlers group0, group1, ... with
+    one counter for the WHOLE config, in file order. Adding a site that sorts
+    first shifts every later site's numbers (seen in phase E: titris
+    group3 -> group4) although nothing changes: a label only says "these
+    handlers exclude each other". Renaming per route keeps that meaning
+    (handlers that shared a group still share one, others still do not), so a
+    real regrouping is still caught.
+    """
+    names = {}
+
+    def walk(value):
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if key == "group" and isinstance(item, str):
+                    if item not in names:
+                        names[item] = f"g{len(names)}"
+                    result[key] = names[item]
+                else:
+                    result[key] = walk(item)
+            return result
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        return value
+
+    return walk(route)
 
 
 def sites(config):
@@ -50,7 +87,7 @@ def sites(config):
                     resolved_logs.append(settings)
                 if host in result:
                     raise SystemExit(f"FAIL: {host} appears in more than one route")
-                result[host] = (canonical(route), canonical(resolved_logs))
+                result[host] = (canonical(normalize_groups(route)), canonical(resolved_logs))
     return result
 
 
@@ -64,9 +101,8 @@ def rest(config):
     return canonical(copy)
 
 
-def main():
-    before_path, after_path, new_domain = sys.argv[1], sys.argv[2], sys.argv[3]
-    before, after = load(before_path), load(after_path)
+def compare(before, after, new_domain=None):
+    """List of problems (empty = pass). new_domain=None: expect no new site."""
     before_sites, after_sites = sites(before), sites(after)
     problems = []
 
@@ -80,18 +116,32 @@ def main():
             problems.append(f"{host}: log settings changed")
 
     added = sorted(set(after_sites) - set(before_sites))
-    if added != [new_domain]:
-        problems.append(f"expected exactly one new site {new_domain}, got {added}")
+    if new_domain is None:
+        expected = []
+    else:
+        expected = [new_domain]
+    if added != expected:
+        problems.append(f"expected new site(s) {expected}, got {added}")
 
     if rest(before) != rest(after):
         problems.append("something outside the site routes and logs changed")
+    return problems
 
+
+def main():
+    if len(sys.argv) not in (3, 4):
+        sys.exit("usage: check_caddy_change.py before.json after.json [new-domain]")
+    before, after = load(sys.argv[1]), load(sys.argv[2])
+    new_domain = sys.argv[3] if len(sys.argv) == 4 else None
+
+    problems = compare(before, after, new_domain)
     if problems:
         for problem in problems:
             print(f"FAIL: {problem}")
         sys.exit(1)
-    print(f"OK: {len(before_sites)} existing site(s) unchanged "
-          f"({', '.join(sorted(before_sites))}); only new site: {new_domain}")
+    existing = sorted(sites(before))
+    added = f"only new site: {new_domain}" if new_domain else "no new site"
+    print(f"OK: {len(existing)} existing site(s) unchanged ({', '.join(existing)}); {added}")
 
 
 if __name__ == "__main__":
