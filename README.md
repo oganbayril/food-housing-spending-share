@@ -174,4 +174,13 @@ uv run python src/find_outliers.py
 uv run python src/build_map.py              # -> site/index.html, images/*.png
 ```
 
+Checks (the browser tests serve `site/` with the production headers and drive
+Edge and Firefox; Firefox needs `uv run --with playwright playwright install firefox` once):
+
+```bash
+uv run --with playwright python tests/browser/test_map_page.py   # CSP, legend, views, zoom limits, themes
+uv run python -m unittest discover deploy/tests                  # deployment gate checker
+bash deploy/tests/test_e2_install_site.sh                        # install script failure paths
+```
+
 Processed data is committed (`data/processed/`); raw downloads are not.
