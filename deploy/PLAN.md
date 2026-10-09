@@ -123,57 +123,79 @@ same `sed` and diff it against the live `realestate.conf`.
 - **HSTS** for this host only: `max-age=31536000`, no `includeSubDomains`,
   no `preload`.
 
-### E1: upload (nothing live changes)
+### E1: upload (done 2026-10-09)
 
 ```bash
 ssh root@89.167.25.74 "mkdir -p /srv/food-housing-share && chmod 755 /srv/food-housing-share"
 scp site/index.html site/shares.csv site/favicon.svg root@89.167.25.74:/srv/food-housing-share/
 ssh root@89.167.25.74 "chmod 644 /srv/food-housing-share/*"
-scp deploy/food-housing.caddy deploy/check_caddy_change.py root@89.167.25.74:/root/
-# the uploaded files must be byte-identical to the tested ones
-sha256sum site/index.html site/shares.csv site/favicon.svg
-ssh root@89.167.25.74 "cd /srv/food-housing-share && sha256sum index.html shares.csv favicon.svg"
+scp deploy/food-housing.caddy deploy/check_caddy_change.py deploy/e2_install_site.sh root@89.167.25.74:/root/
 ```
 
-Stop if any checksum differs.
+Then an automated diff of `sha256sum` local vs. server for every uploaded
+file (Git Bash's `*` binary marker normalised); stop if anything differs.
 
-### E2: install, gated
-
-Gate: `caddy validate` passes **and** `check_caddy_change.py` confirms the
-two existing sites are unchanged (route and resolved log settings per host;
-log numbering may shift because `food-housing.conf` sorts first) and the only
-new site is this one. Otherwise the new file is removed and Caddy is not
-reloaded.
+### E2: install, gated (done 2026-10-09, third attempt)
 
 ```bash
-ssh root@89.167.25.74 'bash -s' <<'REMOTE'
-set -e
-DOMAIN=food-housing-spending-share.duckdns.org
-CONF=/etc/caddy/sites-enabled/food-housing.conf
-[ ! -e "$CONF" ] || { echo "$CONF already exists, stopping"; exit 1; }
-caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-before-e.json
-sed "s/FOODHOUSING_DOMAIN/$DOMAIN/" /root/food-housing.caddy > "$CONF"
-if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
-   && caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-after-e.json \
-   && python3 /root/check_caddy_change.py /root/caddy-before-e.json /root/caddy-after-e.json "$DOMAIN"; then
-  systemctl reload caddy; echo "reloaded"
-else
-  rm -f "$CONF"; echo "check failed -> removed $CONF, no reload"; exit 1
-fi
-REMOTE
+ssh root@89.167.25.74 'bash /root/e2_install_site.sh'   # last line must be "reloaded"
 ```
 
-### E3: re-check all three sites
+`deploy/e2_install_site.sh` (failure paths tested off the server by
+`deploy/tests/test_e2_install_site.sh`):
+1. stops, changing nothing, if `food-housing.conf` exists or the site's log
+   exists and is not owned by `caddy`;
+2. saves the current config (`caddy adapt`) as the reference;
+3. pre-creates `/var/log/caddy/food-housing.log` owned by `caddy`, mode 600;
+4. writes `sites-enabled/food-housing.conf` from the template;
+5. gate: `caddy validate` **as the caddy user** (`runuser`, the service's
+   `HOME`), `caddy adapt`, and `check_caddy_change.py` (existing sites
+   unchanged per host; only new site is this one);
+6. `systemctl reload caddy`; a failed gate **or a failed reload** removes the
+   new conf, and the log only if this run created it and it is still empty;
+7. checks the admin API lists exactly the three hosts and prints the journal
+   lines from the reload; last line `reloaded`.
 
-- germany-real-estate: `/health` 200 (GET and HEAD), same certificate.
+What the first two attempts taught (both left the live sites untouched):
+- **Attempt 1** stopped at the gate: `titris.duckdns.org: route changed`. A
+  false positive: Caddy's auto-generated group label shifted (group3 ->
+  group4) because `food-housing.conf` sorts first. The checker now renames
+  groups per site (tests with the real before/after files as fixtures).
+- **Attempt 2** passed the gate but the reload failed:
+  `open /var/log/caddy/food-housing.log: permission denied`. Attempt 1's
+  `caddy validate`, run as root, had created the log file owned by root;
+  Caddy runs as `caddy`. And `set -e` made the failed reload skip the
+  cleanup, leaving the new conf on disk (disk and running config disagreed
+  until the rollback: a restart would have failed). Rolled back, verified
+  (checker in no-new-site mode vs. the live admin API; `caddy validate` as
+  `caddy`), then fixed in the script above.
+
+### E3: re-check all three sites (done 2026-10-09)
+
+- germany-real-estate: `GET` and `HEAD /health` 200, `HEAD /` 200, same
+  certificate (notAfter 2026-12-02), its own headers unchanged.
 - titris: 200.
 - food-housing: certificate issued on the first HTTPS request (retry for up
-  to a minute); `/` 200 `text/html` with HSTS `max-age=31536000` only,
-  `frame-ancestors` CSP header, nosniff; `/shares.csv` with
-  `Content-Disposition: attachment`; `/favicon.svg` 200.
-- `journalctl -u caddy`: no errors since the reload.
+  to a minute; took ~2 s); `/` 200 `text/html`; HSTS exactly
+  `max-age=31536000`; `Content-Security-Policy: frame-ancestors 'none'`;
+  nosniff, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, no
+  `Server` header; served `index.html`, `shares.csv`, `favicon.svg`
+  byte-identical to the tested files; `/shares.csv` with
+  `Content-Disposition: attachment`; `/favicon.svg` 200 `image/svg+xml`.
+- **The CSP `<meta>` is the first element in `<head>`: the line right after
+  `<head>`** (not a fixed line number; an earlier version of this check
+  looked at line 3, which is `<head>` itself):
+  `curl -s https://<host>/ | awk 'found { print; exit } /^<head>$/ { found = 1 }'`
+- `journalctl -u caddy` since the reload: no warnings or errors other than
+  the standard port-80 "HTTP/2 / HTTP/3 skipped because it requires TLS".
+- Admin API host list: the three hosts.
+- Note: after a failed then successful reload, `systemctl status caddy`
+  keeps showing the failed reload's message in its `Status:` line until the
+  next restart. The `ExecReload` line (`status=0/SUCCESS`), the journal and
+  the admin API are authoritative.
 
-Rollback: `rm /etc/caddy/sites-enabled/food-housing.conf && systemctl reload caddy`.
+Rollback: `rm /etc/caddy/sites-enabled/food-housing.conf && systemctl reload caddy`
+(leave `/var/log/caddy/food-housing.log`, owned by `caddy`).
 
 ## Updating the site later
 
