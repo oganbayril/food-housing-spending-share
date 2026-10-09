@@ -4,6 +4,7 @@ Output:
 - site/index.html               standalone page (Plotly included; the map outlines
                                 are loaded from Plotly's CDN, so it needs internet)
 - site/shares.csv               the processed data, as a download
+- site/favicon.svg              small icon (avoids a favicon.ico 404)
 - images/map_2024.png           static image, world view (README)
 - images/map_2024_europe.png    static image, Europe view (README)
 
@@ -28,7 +29,10 @@ Run from the project root, after src/combine_sources.py:
     uv run python src/build_map.py
 """
 
+import base64
+import hashlib
 import json
+import re
 import shutil
 
 import pandas as pd
@@ -108,6 +112,40 @@ COVID_YEARS = [2020, 2021]
 COVID_NOTE = (
     "Note for {year}: higher shares across many countries likely reflect lower "
     "spending on restaurants, travel and leisure during COVID-19 (cause not verified)."
+)
+
+# Plotly toolbar: keep download-as-PNG, pan, zoom, reset. Remove "Share
+# chart..." (sendChartToCloud), which uploads the chart to Plotly Cloud, the
+# select/lasso tools (meaningless on a map) and the Plotly logo.
+PLOTLY_CONFIG = {
+    "displaylogo": False,
+    "modeBarButtonsToRemove": ["sendChartToCloud", "select2d", "lasso2d"],
+}
+
+# Content-Security-Policy, the narrowest that works (tested in Edge and
+# Firefox, light and dark, with every interaction; see deploy/PLAN.md):
+# - scripts: only the page's own inline scripts, by hash (filled in at build)
+# - styles: 'unsafe-inline', because Plotly sets style="..." attributes and
+#   injects <style> elements at runtime (static page, no user input)
+# - images: same origin (favicon) and blob: (Plotly's PNG export)
+# - connections: Plotly's CDN, which serves the map outlines
+CSP_TEMPLATE = (
+    "default-src 'none'; "
+    "script-src {script_hashes}; "
+    "style-src 'unsafe-inline'; "
+    "img-src 'self' blob:; "
+    "connect-src https://cdn.plot.ly; "
+    "base-uri 'none'; "
+    "form-action 'none'"
+)
+
+FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">'
+    '<rect width="16" height="16" rx="3" fill="#2a78d6"/>'
+    '<rect x="3" y="9" width="3" height="4" fill="#cde2fb"/>'
+    '<rect x="7" y="6" width="3" height="7" fill="#cde2fb"/>'
+    '<rect x="11" y="3" width="2" height="10" fill="#cde2fb"/>'
+    "</svg>\n"
 )
 
 # Map extents for the World / Europe buttons (longitude and latitude ranges).
@@ -417,6 +455,7 @@ def page_html(fig, table):
         auto_play=False,
         div_id="map",
         post_script="window.mapDrawn = true; if (window.initMap) { window.initMap(); }",
+        config=PLOTLY_CONFIG,
     )
     latest = table[table["year"] == MAP_DEFAULT_YEAR]
     n_data = (latest["tier"] != NO_DATA).sum()
@@ -429,6 +468,7 @@ def page_html(fig, table):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Food & Housing Spending Share</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
   :root {{ --surface: {light['surface']}; --text: {light['text']}; --text-2: {light['text_2']};
           --border: {light['border']}; color-scheme: light; }}
@@ -524,6 +564,48 @@ A share of spending, not of income.</p>
 """
 
 
+def inline_scripts(page):
+    """The text of every inline <script> in the page, as the browser sees it."""
+    return re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", page, flags=re.DOTALL)
+
+
+def script_hash(text):
+    """CSP hash source for one inline script: 'sha256-<base64 of SHA-256>'."""
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    return "'sha256-" + base64.b64encode(digest).decode("ascii") + "'"
+
+
+def add_csp_meta(page):
+    """Insert the Content-Security-Policy as the FIRST element in <head>.
+
+    Scripts are allowed by hash, not 'unsafe-inline'. The hashes are computed
+    here from this very page, so they can never go out of date when the data
+    (and therefore the figure script) changes. frame-ancestors cannot be set
+    in a <meta> policy; Caddy sends it as a header instead.
+    """
+    hashes = []
+    for text in inline_scripts(page):
+        hashes.append(script_hash(text))
+    policy = CSP_TEMPLATE.format(script_hashes=" ".join(hashes))
+    meta = f'<meta http-equiv="Content-Security-Policy" content="{policy}">'
+    if page.count("<head>\n") != 1:
+        raise ValueError("Expected exactly one <head>")
+    return page.replace("<head>\n", f"<head>\n{meta}\n", 1)
+
+
+def check_csp_meta(page):
+    """Stop the build unless the CSP meta is first in <head> and covers every script."""
+    head = page.split("<head>\n", 1)[1]
+    first_element = head.split("\n", 1)[0]
+    if not first_element.startswith('<meta http-equiv="Content-Security-Policy"'):
+        raise ValueError(f"CSP meta is not the first element in <head>: {first_element[:80]}")
+    for text in inline_scripts(page):
+        if script_hash(text) not in first_element:
+            raise ValueError("An inline script is not covered by the CSP hashes")
+    print(f"CSP check: <meta> is first in <head>; all {len(inline_scripts(page))} inline "
+          f"scripts are allowed by hash.")
+
+
 def save_png(fig, path, view):
     """Static image of the map as it opens (no slider or buttons)."""
     static = go.Figure(data=fig.data, layout=fig.layout)
@@ -547,8 +629,13 @@ def main():
     SITE_DIR.mkdir(parents=True, exist_ok=True)
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     html_path = SITE_DIR / "index.html"
-    html_path.write_text(page_html(fig, table), encoding="utf-8")
+    page = add_csp_meta(page_html(fig, table))
+    check_csp_meta(page)
+    # newline="\n": the same bytes on every OS (Windows would write \r\n).
+    html_path.write_text(page, encoding="utf-8", newline="\n")
     print(f"Saved {html_path} ({html_path.stat().st_size / 1e6:.1f} MB)")
+
+    (SITE_DIR / "favicon.svg").write_text(FAVICON_SVG, encoding="utf-8", newline="\n")
 
     shutil.copyfile(PROCESSED_DIR / "shares.csv", SITE_DIR / "shares.csv")
     print(f"Copied shares.csv to {SITE_DIR}")

@@ -43,7 +43,7 @@ Both files downloaded to `C:\Users\Ogi\caddy-backups\` (checksums match).
 The "before" JSON is produced with `caddy adapt` from the files on disk, the
 same way as the "after" JSON in phase C, so the comparison is like for like.
 
-## Phase C: rename `00-existing.conf` to `realestate.conf`
+## Phase C: rename `00-existing.conf` to `realestate.conf` (done 2026-10-08)
 
 Gives the real-estate repo a clearly named file to own (phase D). Import
 order is unchanged: Caddy imports `sites-enabled/*` alphabetically, and both
@@ -73,7 +73,7 @@ no errors in `journalctl -u caddy`.
 Rollback: `mv realestate.conf 00-existing.conf && systemctl reload caddy`
 (or restore the phase B tarball).
 
-## Phase D: real-estate `setup.sh` stops overwriting the main Caddyfile
+## Phase D: real-estate `setup.sh` stops overwriting the main Caddyfile (done 2026-10-08)
 
 A separate commit in the **germany-real-estate-api** repo:
 - `setup.sh` writes `/etc/caddy/sites-enabled/realestate.conf` instead of
@@ -87,54 +87,102 @@ same `sed` and diff it against the live `realestate.conf`.
 
 ## Phase E: add this site
 
-1. Files, from the local machine, after `uv run python src/build_map.py`:
+### Pre-checks (done 2026-10-09)
 
-   ```bash
-   ssh root@89.167.25.74 "mkdir -p /srv/food-housing-share && chmod 755 /srv/food-housing-share"
-   scp site/index.html site/shares.csv root@89.167.25.74:/srv/food-housing-share/
-   ssh root@89.167.25.74 "chmod 644 /srv/food-housing-share/*"
-   scp deploy/food-housing.caddy root@89.167.25.74:/root/food-housing.caddy
-   ```
+- DNS: `food-housing-spending-share.duckdns.org` -> `89.167.25.74` on the local
+  resolver, 1.1.1.1 and 8.8.8.8; no AAAA record; port 80 reaches Caddy.
+- **Content-Security-Policy**, tested before any upload. `site/` was served
+  locally with the same headers as `deploy/food-housing.caddy`, and the page
+  was driven with Playwright in **Edge 154 and Firefox 155, light and dark**:
+  load, hover tooltip, World/Europe, slider, Play, PNG download, CSV download.
+  Result in all four runs: **0 CSP violations, 0 console errors, 0 failed
+  requests**. Negative control: a copy of the page with one extra, unhashed
+  inline script was blocked in all four runs (the policy is enforced).
 
-2. **Before the reload:** check the response headers in
-   `deploy/food-housing.caddy` against what the page needs: its inline
-   scripts (Plotly and the page script) and the runtime fetch of the map
-   outlines from Plotly's CDN. A Content-Security-Policy, if added, must
-   allow both, and must be tested in a browser.
-3. Site config, on the server:
+  Policy (a `<meta>`, first element in `<head>`, written by
+  `src/build_map.py` with script hashes computed from the same page, so they
+  cannot go stale when the data changes):
 
-   ```bash
-   sed "s/FOODHOUSING_DOMAIN/food-housing-spending-share.duckdns.org/" /root/food-housing.caddy \
-     > /etc/caddy/sites-enabled/food-housing.conf
-   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-   systemctl reload caddy
-   ```
+  ```
+  default-src 'none'; script-src 'sha256-...' (the page's 4 inline scripts);
+  style-src 'unsafe-inline'; img-src 'self' blob:;
+  connect-src https://cdn.plot.ly; base-uri 'none'; form-action 'none'
+  ```
 
-   `food-housing.conf` sorts first alphabetically; each file is a different
-   domain, so order does not matter.
+  | Directive | Why |
+  |---|---|
+  | `script-src` hashes | 4 inline scripts (Plotly config, bundle, figure, page script); no `'unsafe-inline'`, no `'unsafe-eval'` (never requested) |
+  | `style-src 'unsafe-inline'` | Plotly sets `style="..."` and injects `<style>` at runtime |
+  | `img-src 'self' blob:` | favicon; Plotly's PNG export draws via a `blob:` image (`data:` never requested) |
+  | `connect-src https://cdn.plot.ly` | map outlines: `https://cdn.plot.ly/un/world_50m.json` |
 
-4. Test:
+  Caddy adds `Content-Security-Policy: frame-ancestors 'none'` as a header
+  (not possible in a `<meta>`); browsers enforce both policies.
+- Plotly's **"Share chart..." button removed**: it uploads the chart to
+  Plotly Cloud. Select/lasso tools and the Plotly logo removed too.
+- **HSTS** for this host only: `max-age=31536000`, no `includeSubDomains`,
+  no `preload`.
 
-   ```bash
-   curl -sI https://food-housing-spending-share.duckdns.org/ | head -5        # 200, text/html, HSTS
-   curl -sI https://food-housing-spending-share.duckdns.org/shares.csv | grep -i disposition
-   curl -s -o /dev/null -w "%{http_code}\n" https://germany-real-estate.duckdns.org/health
-   curl -s -o /dev/null -w "%{http_code}\n" https://titris.duckdns.org/
-   ```
+### E1: upload (nothing live changes)
 
-   Then in a browser: map loads, slider, hover, dark mode, World / Europe
-   zoom, CSV download.
+```bash
+ssh root@89.167.25.74 "mkdir -p /srv/food-housing-share && chmod 755 /srv/food-housing-share"
+scp site/index.html site/shares.csv site/favicon.svg root@89.167.25.74:/srv/food-housing-share/
+ssh root@89.167.25.74 "chmod 644 /srv/food-housing-share/*"
+scp deploy/food-housing.caddy deploy/check_caddy_change.py root@89.167.25.74:/root/
+# the uploaded files must be byte-identical to the tested ones
+sha256sum site/index.html site/shares.csv site/favicon.svg
+ssh root@89.167.25.74 "cd /srv/food-housing-share && sha256sum index.html shares.csv favicon.svg"
+```
+
+Stop if any checksum differs.
+
+### E2: install, gated
+
+Gate: `caddy validate` passes **and** `check_caddy_change.py` confirms the
+two existing sites are unchanged (route and resolved log settings per host;
+log numbering may shift because `food-housing.conf` sorts first) and the only
+new site is this one. Otherwise the new file is removed and Caddy is not
+reloaded.
+
+```bash
+ssh root@89.167.25.74 'bash -s' <<'REMOTE'
+set -e
+DOMAIN=food-housing-spending-share.duckdns.org
+CONF=/etc/caddy/sites-enabled/food-housing.conf
+[ ! -e "$CONF" ] || { echo "$CONF already exists, stopping"; exit 1; }
+caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-before-e.json
+sed "s/FOODHOUSING_DOMAIN/$DOMAIN/" /root/food-housing.caddy > "$CONF"
+if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile    && caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile > /root/caddy-after-e.json    && python3 /root/check_caddy_change.py /root/caddy-before-e.json /root/caddy-after-e.json "$DOMAIN"; then
+  systemctl reload caddy; echo "reloaded"
+else
+  rm -f "$CONF"; echo "check failed -> removed $CONF, no reload"; exit 1
+fi
+REMOTE
+```
+
+### E3: re-check all three sites
+
+- germany-real-estate: `/health` 200 (GET and HEAD), same certificate.
+- titris: 200.
+- food-housing: certificate issued on the first HTTPS request (retry for up
+  to a minute); `/` 200 `text/html` with HSTS `max-age=31536000` only,
+  `frame-ancestors` CSP header, nosniff; `/shares.csv` with
+  `Content-Disposition: attachment`; `/favicon.svg` 200.
+- `journalctl -u caddy`: no errors since the reload.
 
 Rollback: `rm /etc/caddy/sites-enabled/food-housing.conf && systemctl reload caddy`.
 
 ## Updating the site later
 
-The data changes about once a year. Rebuild locally and copy the two files;
-no Caddy reload is needed for static files:
+The data changes about once a year. Rebuild locally (the CSP hashes are
+regenerated with the page), re-run the browser test, then copy the files and
+compare checksums; no Caddy reload is needed for static files:
 
 ```bash
 uv run python src/build_map.py
-scp site/index.html site/shares.csv root@89.167.25.74:/srv/food-housing-share/
+scp site/index.html site/shares.csv site/favicon.svg root@89.167.25.74:/srv/food-housing-share/
+sha256sum site/index.html && ssh root@89.167.25.74 "sha256sum /srv/food-housing-share/index.html"
 ```
 
 ## Known follow-ups (not blocking)

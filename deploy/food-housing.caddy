@@ -1,6 +1,6 @@
 # Static site: food-housing-spending-share.
-# Installed as /etc/caddy/sites-enabled/food-housing.conf, with FOODHOUSING_DOMAIN
-# replaced by the real DuckDNS hostname (see deploy/PLAN.md).
+# Installed as /etc/caddy/sites-enabled/food-housing.conf, with the site address
+# below set to the real DuckDNS hostname (see deploy/PLAN.md).
 # Caddy obtains and renews the TLS certificate itself.
 
 FOODHOUSING_DOMAIN {
@@ -9,10 +9,15 @@ FOODHOUSING_DOMAIN {
 	encode zstd gzip
 
 	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# HSTS for this host only: no includeSubDomains, no preload.
+		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "no-referrer"
+		# The page carries the full Content-Security-Policy in a <meta> tag
+		# (script hashes generated with the page). frame-ancestors only works
+		# as a header, so it is set here; browsers enforce both policies.
+		Content-Security-Policy "frame-ancestors 'none'"
 		-Server
 	}
 
