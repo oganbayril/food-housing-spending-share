@@ -205,7 +205,7 @@ compare checksums; no Caddy reload is needed for static files:
 
 ```bash
 uv run python src/build_map.py
-uv run --with playwright python tests/browser/test_map_page.py   # must be all PASS
+uv run --with playwright --with pillow python tests/browser/test_map_page.py   # must be all PASS
 scp site/index.html site/shares.csv site/favicon.svg root@89.167.25.74:/srv/food-housing-share/
 # then the automated sha256sum diff, local vs. server
 ```

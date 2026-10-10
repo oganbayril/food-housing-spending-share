@@ -178,7 +178,7 @@ Checks (the browser tests serve `site/` with the production headers and drive
 Edge and Firefox; Firefox needs `uv run --with playwright playwright install firefox` once):
 
 ```bash
-uv run --with playwright python tests/browser/test_map_page.py   # CSP, legend, views, zoom limits, themes
+uv run --with playwright --with pillow python tests/browser/test_map_page.py   # CSP, legend, views, zoom/pan limits, themes
 uv run python -m unittest discover deploy/tests                  # deployment gate checker
 bash deploy/tests/test_e2_install_site.sh                        # install script failure paths
 ```

@@ -174,6 +174,19 @@ VIEWS = {
 }
 
 
+# How far the frame may be panned past the world's edge, into empty
+# background (the map is never rotated, so nothing wraps in from the other
+# side; the margin only adds space). Lets countries near the edges (New
+# Zealand, Japan, southern Chile) be viewed away from the frame's border.
+# - horizontal: 12% of the visible width (middle of 10-15%), at most 20
+#   degrees of longitude: just above World scale 12% would be 30-40 degrees
+#   of empty space, which reads as the map slipping away, not a margin;
+# - vertical: 8% of the visible height, at most 2 degrees of latitude (to
+#   60 S / 87 N): land in Antarctica's direction (South Orkneys, ~60.5 S)
+#   starts just past 60 S, and the margin must stay empty.
+PAN_MARGINS = {"x_fraction": 0.12, "x_cap_lon": 20, "y_fraction": 0.08, "y_cap_lat": 2}
+
+
 def view_relayout(name):
     """The relayout arguments that set the whole view for a preset."""
     view = VIEWS[name]
@@ -614,42 +627,65 @@ PAGE_SCRIPT = """(function () {
              w: +c.getAttribute("width"), h: +c.getAttribute("height") };
   }
 
+  // Pan margins (PAN_MARGINS in build_map.py): how far the frame may go past
+  // the world's edge, into empty background. Never rotated, so nothing from
+  // the other side of the world can wrap in; the margin only adds space.
+  var MARGINS = __MARGINS__;
+  function marginsFor(sp) {
+    var p = sp.projection, box = frameBox(sp);
+    var pxPerLon = Math.abs(p([1, 0])[0] - p([0, 0])[0]);
+    var pxNorth = Math.abs(p([0, LAT_MAX])[1] - p([0, LAT_MAX + MARGINS.y_cap_lat])[1]);
+    var pxSouth = Math.abs(p([0, LAT_MIN - MARGINS.y_cap_lat])[1] - p([0, LAT_MIN])[1]);
+    return {
+      x: Math.min(MARGINS.x_fraction * box.w, MARGINS.x_cap_lon * pxPerLon),
+      y: Math.min(MARGINS.y_fraction * box.h, pxNorth, pxSouth)
+    };
+  }
+  function within(value, low, high) { return Math.min(Math.max(value, low), high); }
+
   // The only view that may be drawn:
-  // - never zoomed out beyond World (the fitted scale);
+  // - never zoomed out beyond World (the fitted scale), and exactly centred
+  //   at World scale;
   // - never rotated: panning moves the drawn map, it does not turn the globe;
-  // - the frame stays inside the world: no space beyond 85 N / 58 S, no space
-  //   beyond +-180 degrees at the visible latitudes farthest from the equator
-  //   (where the map is narrowest). Along an axis where the map is still
-  //   smaller than the frame (just above World scale), it is centred.
+  // - the frame may go past the world's edge by at most the margin: past
+  //   +-180 degrees, measured where the map is widest in view (the visible
+  //   latitude closest to the equator; toward the poles the outline curves
+  //   inward, so the empty corner there is a little wider), and past
+  //   85 N / 58 S. If the map is too small to fill the frame even with the
+  //   margins, it is centred.
   function limitView(sp) {
     var p = sp.projection, box = frameBox(sp);
     if (p.scale() < sp.fitScale) { p.scale(sp.fitScale); }
     var r = p.rotate();
     if (r[0] !== 0 || r[1] !== 0 || r[2] !== 0) { p.rotate([0, 0, 0]); }
+    var world = p.scale() <= sp.fitScale * 1.0001;
+    var margin = world ? { x: 0, y: 0 } : marginsFor(sp);
 
     var t = p.translate();
     var yNorth = p([0, LAT_MAX])[1], ySouth = p([0, LAT_MIN])[1];
-    var top = box.y, bottom = box.y + box.h, dy = 0;
-    if (ySouth - yNorth <= box.h) { dy = (top + bottom) / 2 - (yNorth + ySouth) / 2; }
-    else if (yNorth > top) { dy = top - yNorth; }
-    else if (ySouth < bottom) { dy = bottom - ySouth; }
+    var top = box.y, bottom = box.y + box.h, dy;
+    if (world || ySouth - yNorth < box.h - 2 * margin.y) {
+      dy = (top + bottom) / 2 - (yNorth + ySouth) / 2;
+    } else {
+      // shift range that keeps at most margin.y of space above / below
+      dy = within(0, (bottom - margin.y) - ySouth, (top + margin.y) - yNorth);
+    }
     p.translate([t[0], t[1] + dy]);
 
     t = p.translate();
     var centreX = box.x + box.w / 2;
-    var latTop = Math.min(LAT_MAX, p.invert([centreX, top])[1]);
-    var latBottom = Math.max(LAT_MIN, p.invert([centreX, bottom])[1]);
-    var rows = [latTop, latBottom];
-    if (latTop > 0 && latBottom < 0) { rows.push(0); }
-    var left = -Infinity, right = Infinity;
-    rows.forEach(function (lat) {
-      left = Math.max(left, p([-EDGE_LON, lat])[0]);
-      right = Math.min(right, p([EDGE_LON, lat])[0]);
-    });
-    var dx = 0;
-    if (right - left <= box.w) { dx = centreX - (p([-EDGE_LON, 0])[0] + p([EDGE_LON, 0])[0]) / 2; }
-    else if (left > box.x) { dx = box.x - left; }
-    else if (right < box.x + box.w) { dx = box.x + box.w - right; }
+    var latTop = within(p.invert([centreX, top])[1], LAT_MIN, LAT_MAX);
+    var latBottom = within(p.invert([centreX, bottom])[1], LAT_MIN, LAT_MAX);
+    // the visible latitude where the map is widest: closest to the equator
+    var widest = (latTop > 0 && latBottom < 0) ? 0
+               : (Math.abs(latTop) < Math.abs(latBottom) ? latTop : latBottom);
+    var left = p([-EDGE_LON, widest])[0], right = p([EDGE_LON, widest])[0];
+    var dx;
+    if (world || right - left < box.w - 2 * margin.x) {
+      dx = centreX - (p([-EDGE_LON, 0])[0] + p([EDGE_LON, 0])[0]) / 2;
+    } else {
+      dx = within(0, (box.x + box.w - margin.x) - right, (box.x + margin.x) - left);
+    }
     p.translate([t[0] + dx, t[1]]);
   }
 
@@ -915,6 +951,7 @@ def page_script():
         "__DEFAULT_YEAR__": str(MAP_DEFAULT_YEAR),
         "__YEARS__": json.dumps(list(range(FIRST_YEAR, MAP_LAST_YEAR + 1))),
         "__LEGENDS__": json.dumps(LEGEND_LAYOUTS),
+        "__MARGINS__": json.dumps(PAN_MARGINS),
     }
     script = PAGE_SCRIPT
     for placeholder, value in replacements.items():

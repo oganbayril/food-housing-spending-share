@@ -22,7 +22,7 @@ deploy/food-housing.caddy, then checks, in each browser:
   hover      the live tooltip for Germany matches the page data
 
 Run from the project root, after src/build_map.py:
-    uv run --with playwright python tests/browser/test_map_page.py
+    uv run --with playwright --with pillow python tests/browser/test_map_page.py
 (Firefox needs Playwright's build once: uv run --with playwright playwright install firefox)
 """
 
@@ -40,7 +40,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "site"
 sys.path.insert(0, str(ROOT / "src"))
-from build_map import THEMES, TIER_ORDER, VIEWS, tier_colors  # noqa: E402
+from build_map import PAN_MARGINS, THEMES, TIER_ORDER, VIEWS, tier_colors  # noqa: E402
 
 PORT = 8770
 BASE = f"http://127.0.0.1:{PORT}"
@@ -394,22 +394,29 @@ def test_clamp(page):
     go_to_year_with_slider(page, 2024)
 
 
-# --- per-frame view checks (independent of the page's own limit code) --------
+# --- per-frame view checks ------------------------------------------------------
 #
 # On every animation frame, inspect the projection that is actually drawn:
-#   - scale never below World, rotation always [0, 0, 0];
+#   - scale never below World; rotation always [0, 0, 0] (so nothing wraps);
 #   - no wrap: along horizontal scans the on-map longitudes only increase;
-#   - points just inside the frame's edges are on the map (they convert to
-#     lon/lat and back to the same pixel) and inside +-180 / 85 N / 58 S;
-#     off-map points are allowed only along an axis where the map is narrower
-#     than the frame, and then the map must be centred along that axis.
+#   - when panned (not at World scale, axis not centred), anything drawn at
+#     the frame's top / bottom lies within 87 N / 60 S (the outer bounds,
+#     margin included); a centred or World view is fixed, not panned;
+#   - at World scale the map is exactly centred;
+#   - otherwise the frame goes past the world's edge by at most the margin
+#     (PAN_MARGINS: 12% of the width / max 20 deg, 8% of the height / max
+#     2 deg), measured where the map is widest in view (the visible
+#     latitude closest to the equator);
+#     or, if the map cannot fill the frame even with the margin, it is
+#     centred along that axis.
 SAMPLER = """
+window.__margins = __MARGINS__;
 window.__view = {frames: 0, minScale: Infinity, violations: [], running: false};
 window.__viewCheck = function () {
   const gd = document.getElementById('map');
   const sp = gd && gd._fullLayout && gd._fullLayout.geo && gd._fullLayout.geo._subplot;
   if (!sp || !sp.projection) return;
-  const p = sp.projection, c = sp.clipRect.node(), v = window.__view;
+  const p = sp.projection, c = sp.clipRect.node(), v = window.__view, M = window.__margins;
   const X = +c.getAttribute('x'), Y = +c.getAttribute('y'), W = +c.getAttribute('width'), H = +c.getAttribute('height');
   const scale = p.scale() / sp.fitScale, r = p.rotate();
   v.frames++; v.minScale = Math.min(v.minScale, scale);
@@ -418,39 +425,57 @@ window.__viewCheck = function () {
   if (Math.abs(r[0]) > 1e-9 || Math.abs(r[1]) > 1e-9 || Math.abs(r[2]) > 1e-9) add('rotated ' + r.map(x => x.toFixed(3)));
   const onMap = (x, y) => {
     const ll = p.invert([x, y]);
-    if (!ll || !isFinite(ll[0]) || !isFinite(ll[1])) return false;
+    if (!ll || !isFinite(ll[0]) || !isFinite(ll[1])) return null;
     const back = p(ll);
-    if (!back || Math.abs(back[0] - x) > 1.5 || Math.abs(back[1] - y) > 1.5) return false;
-    return ll[0] >= -180 && ll[0] <= 180 && ll[1] >= -58.01 && ll[1] <= 85.01;
+    if (!back || Math.abs(back[0] - x) > 1.5 || Math.abs(back[1] - y) > 1.5) return null;
+    if (ll[0] < -180 || ll[0] > 180) return null;
+    return ll;
   };
-  const inset = 0.5, n = 24;
-  let offSides = false, offTopBottom = false, offCorner = false;
-  for (let i = 0; i <= n; i++) {
-    const fx = X + inset + (W - 2 * inset) * i / n, fy = Y + inset + (H - 2 * inset) * i / n;
-    const middle = i >= n * 0.25 && i <= n * 0.75;
-    for (const [x, y, side] of [[fx, Y + inset, 'tb'], [fx, Y + H - inset, 'tb'], [X + inset, fy, 'lr'], [X + W - inset, fy, 'lr']]) {
-      if (onMap(x, y)) continue;
-      if (!middle) offCorner = true; else if (side === 'lr') offSides = true; else offTopBottom = true;
-    }
+  // margins (or centring) along each axis
+  const tol = 1.5, world = scale <= 1.0001;
+  const pxPerLon = Math.abs(p([1, 0])[0] - p([0, 0])[0]);
+  const pxNorth = Math.abs(p([0, 85])[1] - p([0, 85 + M.y_cap_lat])[1]);
+  const pxSouth = Math.abs(p([0, -58 - M.y_cap_lat])[1] - p([0, -58])[1]);
+  const mX = world ? 0 : Math.min(M.x_fraction * W, M.x_cap_lon * pxPerLon);
+  const mY = world ? 0 : Math.min(M.y_fraction * H, pxNorth, pxSouth);
+  const yN = p([0, 85])[1], yS = p([0, -58])[1];
+  const clampLat = (lat) => Math.min(85, Math.max(-58, lat));
+  const latTop = clampLat(p.invert([X + W / 2, Y])[1]), latBottom = clampLat(p.invert([X + W / 2, Y + H])[1]);
+  const widest = (latTop > 0 && latBottom < 0) ? 0 : (Math.abs(latTop) < Math.abs(latBottom) ? latTop : latBottom);
+  const left = p([-179.999, widest])[0], right = p([179.999, widest])[0];
+  const hCentred = Math.abs((p([-179.999, 0])[0] + p([179.999, 0])[0]) / 2 - (X + W / 2)) < tol;
+  const vCentred = Math.abs((yN + yS) / 2 - (Y + H / 2)) < tol;
+  const s = ' (scale ' + scale.toFixed(2) + ')';
+  if (world) {
+    if (!hCentred || !vCentred) add('World view not centred' + s);
+  } else {
+    if (right - left >= W - 2 * mX) {
+      if (X < left - mX - tol) add('left edge ' + (left - X).toFixed(1) + ' px past -180 (margin ' + mX.toFixed(1) + ')' + s);
+      if (X + W > right + mX + tol) add('right edge ' + (X + W - right).toFixed(1) + ' px past +180 (margin ' + mX.toFixed(1) + ')' + s);
+    } else if (!hCentred) { add('map narrower than frame + margins but not centred' + s); }
+    if (yS - yN >= H - 2 * mY) {
+      if (Y < yN - mY - tol) add('top ' + (yN - Y).toFixed(1) + ' px past 85N (margin ' + mY.toFixed(1) + ')' + s);
+      if (Y + H > yS + mY + tol) add('bottom ' + (Y + H - yS).toFixed(1) + ' px past 58S (margin ' + mY.toFixed(1) + ')' + s);
+      for (let i = 0; i <= 24; i++) {          // panned vertically: outer latitude bounds
+        for (const [x, y] of [[X + W * i / 24, Y + 0.5], [X + W * i / 24, Y + H - 0.5]]) {
+          const ll = onMap(x, y);
+          if (ll && (ll[1] > 85 + M.y_cap_lat + 0.01 || ll[1] < -58 - M.y_cap_lat - 0.01)) add('beyond the latitude bounds: ' + ll[1].toFixed(2) + s);
+        }
+      }
+    } else if (!vCentred) { add('map shorter than frame + margins but not centred' + s); }
   }
-  const xL = p([-179.999, 0])[0], xR = p([179.999, 0])[0], yN = p([0, 85])[1], yS = p([0, -58])[1];
-  const hCentred = Math.abs((xL + xR) / 2 - (X + W / 2)) < 1.5;
-  const vCentred = Math.abs((yN + yS) / 2 - (Y + H / 2)) < 1.5;
-  if (offSides && !hCentred) add('space beyond +-180 while not centred (scale ' + scale.toFixed(2) + ')');
-  if (offTopBottom && !vCentred) add('space beyond 85N/58S while not centred (scale ' + scale.toFixed(2) + ')');
-  if (offCorner && !hCentred && !vCentred) add('corner off the map, neither axis centred (scale ' + scale.toFixed(2) + ')');
+  // no wrap
   for (let row = 1; row <= 5; row++) {
     const y = Y + H * row / 6; let previous = null;
     for (let i = 0; i <= 40; i++) {
-      const x = X + W * i / 40; if (!onMap(x, y)) continue;
-      const lon = p.invert([x, y])[0];
-      if (previous !== null && lon < previous - 1e-6) { add('wrap: longitude jumps back at row ' + row); break; }
-      previous = lon;
+      const ll = onMap(X + W * i / 40, y); if (!ll) continue;
+      if (previous !== null && ll[0] < previous - 1e-6) { add('wrap: longitude jumps back at row ' + row); break; }
+      previous = ll[0];
     }
   }
 };
 window.__viewLoop = function () { if (!window.__view.running) return; window.__viewCheck(); requestAnimationFrame(window.__viewLoop); };
-"""
+""".replace("__MARGINS__", json.dumps(PAN_MARGINS))
 
 
 def start_sampler(page):
@@ -531,6 +556,119 @@ def drag_and_wheel_checks(page, label, zooms=(2, 4, 8), directions=tuple(DIRECTI
           f"min scale {sampled['minScale']:.4f}, end {view(page)}, {sampled['violations'][:2]}")
 
 
+EDGE_COUNTRIES = {  # bounding boxes: lon west, lon east, lat south, lat north
+    "New Zealand": (166.4, 178.6, -47.3, -34.4),
+    "Japan": (122.9, 145.9, 24.0, 45.6),
+}
+
+
+def bring_into_view(page, lon, lat):
+    """As a user would: scroll to 2x on the place, then drag it to the middle."""
+    click_view(page, "world")
+    point = screen_point(page, lon, lat)
+    page.mouse.move(point["x"], point["y"])
+    for _ in range(5):                        # 5 x 2^(100 x 0.002) = exactly 2x
+        page.mouse.wheel(0, -100)
+        page.wait_for_timeout(60)
+    settle(page, 500)
+    box = page.locator("#map .geo").first.bounding_box()
+    middle = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    for _ in range(2):                        # drag the place towards the middle
+        point = screen_point(page, lon, lat)
+        page.mouse.move(point["x"], point["y"])
+        page.mouse.down()
+        page.mouse.move(*middle, steps=10)
+        page.mouse.up()
+        settle(page, 300)
+
+
+def test_edge_countries(page, label):
+    """New Zealand and Japan, near the antimeridian, fully and comfortably in view at 2x."""
+    for name, (west, east, south, north) in EDGE_COUNTRIES.items():
+        bring_into_view(page, (west + east) / 2, (south + north) / 2)
+        scale = view(page)["scale"]
+        frame = page.evaluate("""() => { const sp = document.getElementById('map')._fullLayout.geo._subplot;
+            const c = sp.clipRect.node(), f = sp.framework.node().getBoundingClientRect();
+            const x = +c.getAttribute('x'), y = +c.getAttribute('y');
+            return [f.left, f.top, f.left + (+c.getAttribute('width')), f.top + (+c.getAttribute('height'))]; }""")
+        inset = 0.05 * (frame[2] - frame[0])
+        corners = [screen_point(page, lon, lat) for lon in (west, east) for lat in (south, north)]
+        clear = all(frame[0] + inset <= c["x"] <= frame[2] - inset and frame[1] + inset <= c["y"] <= frame[3] - inset
+                    for c in corners)
+        gaps = {"west": min(c["x"] for c in corners) - frame[0], "east": frame[2] - max(c["x"] for c in corners),
+                "north": min(c["y"] for c in corners) - frame[1], "south": frame[3] - max(c["y"] for c in corners)}
+        check(f"{label}: {name} fully in view at 2x, at least 5% of the width from every edge",
+              clear and abs(scale - 2) < 0.01,
+              f"scale {scale:.3f}, gaps to frame edges (px) "
+              + ", ".join(f"{k} {v:.0f}" for k, v in gaps.items()) + f", required {inset:.0f}")
+
+
+def test_edge_background(page, label):
+    """Past the world's edge: only clean background (no slivers, no duplicated land).
+
+    Zoom to 2x near the edge, drag hard towards it until the margin stops the
+    view, screenshot the map and check every pixel beyond the drawn outline
+    (x of +-180 degrees at that row's latitude, plus 3 px for antialiasing)
+    is exactly the background colour (the legend's own box is skipped: it
+    may sit over the margin and is not map content).
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    for side, (lon, lat), drag in [("right (+180, New Zealand side)", (170, -35), "left"),
+                                   ("left (-180, Alaska side)", (-165, 60), "right")]:
+        click_view(page, "world")
+        point = screen_point(page, lon, lat)
+        page.mouse.move(point["x"], point["y"])
+        for _ in range(5):
+            page.mouse.wheel(0, -100)
+            page.wait_for_timeout(60)
+        settle(page, 400)
+        hard_drags(page, drag, repeats=4)
+        settle(page, 500)
+        page.mouse.move(2, 2)                 # no tooltip over the map
+        settle(page, 300)
+        edge_lon = 179.999 if drag == "left" else -179.999
+        rows = page.evaluate("""(edgeLon) => {
+            const sp = document.getElementById('map')._fullLayout.geo._subplot, p = sp.projection;
+            const c = sp.clipRect.node(), f = sp.framework.node().getBoundingClientRect();
+            const X = +c.getAttribute('x'), Y = +c.getAttribute('y'), W = +c.getAttribute('width'), H = +c.getAttribute('height');
+            const out = [];
+            for (let i = 2; i < 60; i++) {
+                const y = Y + H * i / 60, ll = p.invert([X + W / 2, y]);
+                if (!ll) continue;
+                const lat = Math.max(-89.9, Math.min(89.9, ll[1]));
+                out.push({y: f.top + (y - Y), edge: f.left + (p([edgeLon, lat])[0] - X)});
+            }
+            return {rows: out, frame: [f.left, f.top, f.left + W, f.top + H],
+                    surface: getComputedStyle(document.body).backgroundColor}; }""", edge_lon)
+        frame = rows["frame"]
+        # The legend may sit over the empty margin (bottom-left at wide
+        # widths): its own pixels are not map content, so its box is skipped.
+        legend = page.evaluate("""() => { const b = document.querySelector('#map .legend').getBoundingClientRect();
+            return [b.left - 2, b.top - 2, b.right + 2, b.bottom + 2]; }""")
+        surface = tuple(int(v) for v in re.findall(r"\d+", rows["surface"])[:3])
+        image = Image.open(BytesIO(page.screenshot())).convert("RGB")
+        scale_x = image.width / page.viewport_size["width"]
+        bad, beyond_px = 0, 0
+        for row in rows["rows"]:
+            if drag == "left":
+                xs = range(int(row["edge"] + 3), int(frame[2]) - 1)
+            else:
+                xs = range(int(frame[0]) + 1, int(row["edge"] - 3))
+            for x in xs:
+                if legend[0] <= x <= legend[2] and legend[1] <= row["y"] <= legend[3]:
+                    continue
+                beyond_px += 1
+                pixel = image.getpixel((int(x * scale_x), int(row["y"] * scale_x)))
+                if max(abs(a - b) for a, b in zip(pixel, surface)) > 2:
+                    bad += 1
+        check(f"{label}: past the {side} edge only clean background",
+              beyond_px > 200 and bad == 0,
+              f"{beyond_px} pixels beyond the outline checked, {bad} not background (expected {surface})")
+
+
 def test_view_limits(browser, scheme):
     """(a) + (b), then (c): the same while Play runs and after a theme switch."""
     context = browser.new_context(color_scheme=scheme, viewport={"width": 1280, "height": 1000})
@@ -540,6 +678,8 @@ def test_view_limits(browser, scheme):
     page.goto(BASE + "/index.html")
     wait_for_map(page)
     drag_and_wheel_checks(page, f"[{scheme}]")
+    test_edge_countries(page, f"[{scheme}]")
+    test_edge_background(page, f"[{scheme}]")
 
     go_to_year_with_slider(page, 1995)
     page.locator("[data-play]").click()                   # Play runs during the next checks
