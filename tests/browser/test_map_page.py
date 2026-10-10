@@ -366,6 +366,7 @@ def test_clamp(page):
     # window (Firefox delivers no mouse events once the pointer leaves it).
     box = page.locator("#map .geo").first.bounding_box()
     start = (box["x"] + box["width"] * 0.3, box["y"] + box["height"] * 0.3)
+    start_sampler(page)
     for _ in range(12):
         page.mouse.move(*start)
         page.mouse.down()
@@ -373,13 +374,11 @@ def test_clamp(page):
         page.mouse.up()
         page.wait_for_timeout(150)
     settle(page, 1000)
+    sampled = stop_sampler(page)
     after = view(page)
-    half_lon, half_lat = 180 / after["scale"], 71.5 / after["scale"]
-    inside = (-180 + half_lon - 1e-6 <= after["lon"] <= 180 - half_lon + 1e-6
-              and -58 + half_lat - 1e-6 <= after["lat"] <= 85 - half_lat + 1e-6
-              and abs(after["rotation"] - after["lon"]) < 1e-6)
-    check("zoomed: dragging pans but cannot leave the bounds or rotate", inside and after["lon"] != zoomed["lon"],
-          str(after))
+    check("zoomed: dragging pans but never leaves the world or rotates (every frame)",
+          not sampled["violations"] and after["lon"] != zoomed["lon"] and abs(after["rotation"]) < 1e-9,
+          f"{sampled['frames']} frames, violations {sampled['violations'][:3]}, view {after}")
 
     click_view(page, "europe")
     check("Europe after zoom + drag: exact preset", same_view(view(page), preset("europe")), str(view(page)))
@@ -393,6 +392,203 @@ def test_clamp(page):
     settle(page)
     check("drag at World scale still does nothing afterwards", same_view(view(page), before), str(view(page)))
     go_to_year_with_slider(page, 2024)
+
+
+# --- per-frame view checks (independent of the page's own limit code) --------
+#
+# On every animation frame, inspect the projection that is actually drawn:
+#   - scale never below World, rotation always [0, 0, 0];
+#   - no wrap: along horizontal scans the on-map longitudes only increase;
+#   - points just inside the frame's edges are on the map (they convert to
+#     lon/lat and back to the same pixel) and inside +-180 / 85 N / 58 S;
+#     off-map points are allowed only along an axis where the map is narrower
+#     than the frame, and then the map must be centred along that axis.
+SAMPLER = """
+window.__view = {frames: 0, minScale: Infinity, violations: [], running: false};
+window.__viewCheck = function () {
+  const gd = document.getElementById('map');
+  const sp = gd && gd._fullLayout && gd._fullLayout.geo && gd._fullLayout.geo._subplot;
+  if (!sp || !sp.projection) return;
+  const p = sp.projection, c = sp.clipRect.node(), v = window.__view;
+  const X = +c.getAttribute('x'), Y = +c.getAttribute('y'), W = +c.getAttribute('width'), H = +c.getAttribute('height');
+  const scale = p.scale() / sp.fitScale, r = p.rotate();
+  v.frames++; v.minScale = Math.min(v.minScale, scale);
+  const add = (text) => { if (v.violations.length < 20) v.violations.push(text); };
+  if (scale < 1 - 1e-6) add('scale ' + scale.toFixed(4) + ' below World');
+  if (Math.abs(r[0]) > 1e-9 || Math.abs(r[1]) > 1e-9 || Math.abs(r[2]) > 1e-9) add('rotated ' + r.map(x => x.toFixed(3)));
+  const onMap = (x, y) => {
+    const ll = p.invert([x, y]);
+    if (!ll || !isFinite(ll[0]) || !isFinite(ll[1])) return false;
+    const back = p(ll);
+    if (!back || Math.abs(back[0] - x) > 1.5 || Math.abs(back[1] - y) > 1.5) return false;
+    return ll[0] >= -180 && ll[0] <= 180 && ll[1] >= -58.01 && ll[1] <= 85.01;
+  };
+  const inset = 0.5, n = 24;
+  let offSides = false, offTopBottom = false, offCorner = false;
+  for (let i = 0; i <= n; i++) {
+    const fx = X + inset + (W - 2 * inset) * i / n, fy = Y + inset + (H - 2 * inset) * i / n;
+    const middle = i >= n * 0.25 && i <= n * 0.75;
+    for (const [x, y, side] of [[fx, Y + inset, 'tb'], [fx, Y + H - inset, 'tb'], [X + inset, fy, 'lr'], [X + W - inset, fy, 'lr']]) {
+      if (onMap(x, y)) continue;
+      if (!middle) offCorner = true; else if (side === 'lr') offSides = true; else offTopBottom = true;
+    }
+  }
+  const xL = p([-179.999, 0])[0], xR = p([179.999, 0])[0], yN = p([0, 85])[1], yS = p([0, -58])[1];
+  const hCentred = Math.abs((xL + xR) / 2 - (X + W / 2)) < 1.5;
+  const vCentred = Math.abs((yN + yS) / 2 - (Y + H / 2)) < 1.5;
+  if (offSides && !hCentred) add('space beyond +-180 while not centred (scale ' + scale.toFixed(2) + ')');
+  if (offTopBottom && !vCentred) add('space beyond 85N/58S while not centred (scale ' + scale.toFixed(2) + ')');
+  if (offCorner && !hCentred && !vCentred) add('corner off the map, neither axis centred (scale ' + scale.toFixed(2) + ')');
+  for (let row = 1; row <= 5; row++) {
+    const y = Y + H * row / 6; let previous = null;
+    for (let i = 0; i <= 40; i++) {
+      const x = X + W * i / 40; if (!onMap(x, y)) continue;
+      const lon = p.invert([x, y])[0];
+      if (previous !== null && lon < previous - 1e-6) { add('wrap: longitude jumps back at row ' + row); break; }
+      previous = lon;
+    }
+  }
+};
+window.__viewLoop = function () { if (!window.__view.running) return; window.__viewCheck(); requestAnimationFrame(window.__viewLoop); };
+"""
+
+
+def start_sampler(page):
+    page.evaluate("() => { if (!window.__viewLoop) {" + SAMPLER + "} }")
+    page.evaluate("() => { window.__view = {frames: 0, minScale: Infinity, violations: [], running: true}; requestAnimationFrame(window.__viewLoop); }")
+
+
+def stop_sampler(page):
+    return page.evaluate("() => { window.__view.running = false; window.__viewCheck(); return window.__view; }")
+
+
+def set_zoom(page, scale, lon=0.0, lat=20.0):
+    """Put the view at a zoom level through Plotly (the safety net limits it)."""
+    page.evaluate("(a) => Plotly.relayout('map', {'geo.projection.scale': a[0], 'geo.center.lon': a[1], "
+                  "'geo.center.lat': a[2], 'geo.projection.rotation.lon': 0})", [scale, lon, lat])
+    settle(page, 900)
+
+
+DIRECTIONS = {"right": (1, 0), "left": (-1, 0), "up": (0, -1), "down": (0, 1),
+              "up-right": (1, -1), "up-left": (-1, -1), "down-right": (1, 1), "down-left": (-1, 1)}
+
+
+def hard_drags(page, direction, repeats=3):
+    """Drag hard in one direction, several times, always inside the window."""
+    box = page.locator("#map .geo").first.bounding_box()
+    dx, dy = DIRECTIONS[direction]
+    for _ in range(repeats):
+        start = (box["x"] + box["width"] * (0.5 - 0.35 * dx), box["y"] + box["height"] * (0.5 - 0.35 * dy))
+        end = (box["x"] + box["width"] * (0.5 + 0.35 * dx), box["y"] + box["height"] * (0.5 + 0.35 * dy))
+        page.mouse.move(*start)
+        page.mouse.down()
+        page.mouse.move(*end, steps=10)
+        page.mouse.up()
+
+
+def wheel_burst(page, count, delta):
+    """`count` wheel events with no pauses (a fast burst), at the map's centre."""
+    box = page.locator("#map .geo").first.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    for _ in range(count):
+        page.mouse.wheel(0, delta)
+
+
+def drag_and_wheel_checks(page, label, zooms=(2, 4, 8), directions=tuple(DIRECTIONS)):
+    """(a) hard drags at several zoom levels, (b) wheel-out bursts; every frame checked."""
+    for zoom in zooms:
+        set_zoom(page, zoom)
+        start_sampler(page)
+        bad_directions = []
+        for direction in directions:
+            before = len(page.evaluate("window.__view.violations"))
+            hard_drags(page, direction)
+            settle(page, 300)
+            if len(page.evaluate("window.__view.violations")) > before:
+                bad_directions.append(direction)
+        sampled = stop_sampler(page)
+        check(f"{label}: zoom {zoom}x, hard drags {'/'.join(directions) if len(directions) < 8 else 'in 8 directions'}: "
+              f"inside the world, no wrap, no rotation, every frame",
+              not sampled["violations"] and sampled["frames"] > 20,
+              f"{sampled['frames']} frames; bad: {bad_directions}; {sampled['violations'][:3]}")
+
+    click_view(page, "world")
+    start_sampler(page)
+    wheel_burst(page, 60, 120)
+    settle(page, 800)
+    sampled = stop_sampler(page)
+    check(f"{label}: burst of 60 wheel-outs at World: scale never below World on any frame",
+          sampled["minScale"] >= 1 - 1e-6 and not sampled["violations"] and sampled["frames"] > 5,
+          f"{sampled['frames']} frames, min scale {sampled['minScale']:.4f}, {sampled['violations'][:2]}")
+
+    set_zoom(page, 1.3)
+    start_sampler(page)
+    wheel_burst(page, 60, 120)
+    settle(page, 800)
+    sampled = stop_sampler(page)
+    check(f"{label}: burst of 60 wheel-outs from 1.3x: never below World, ends at World",
+          sampled["minScale"] >= 1 - 1e-6 and not sampled["violations"] and same_view(view(page), preset("world")),
+          f"min scale {sampled['minScale']:.4f}, end {view(page)}, {sampled['violations'][:2]}")
+
+
+def test_view_limits(browser, scheme):
+    """(a) + (b), then (c): the same while Play runs and after a theme switch."""
+    context = browser.new_context(color_scheme=scheme, viewport={"width": 1280, "height": 1000})
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)[:120]))
+    page.goto(BASE + "/index.html")
+    wait_for_map(page)
+    drag_and_wheel_checks(page, f"[{scheme}]")
+
+    go_to_year_with_slider(page, 1995)
+    page.locator("[data-play]").click()                   # Play runs during the next checks
+    drag_and_wheel_checks(page, f"[{scheme}] during Play", zooms=(4,), directions=("right", "up-left", "down"))
+    playing = page.locator("[data-play]").get_attribute("aria-pressed")
+    if playing == "true":
+        page.locator("[data-play]").click()
+    settle(page)
+
+    other = "dark" if scheme == "light" else "light"
+    page.locator(f'[data-theme-button="{other}"]').click()
+    settle(page)
+    drag_and_wheel_checks(page, f"[{scheme}] after switching to {other}", zooms=(2, 8),
+                          directions=("left", "down-right", "up"))
+    check(f"[{scheme}] no page errors during the view checks", not errors, "; ".join(errors[:3]))
+    context.close()
+
+
+def test_pinch(browser):
+    """Edge only (touch through the DevTools protocol): two-finger pinch."""
+    context = browser.new_context(viewport={"width": 1280, "height": 1000}, has_touch=True)
+    page = context.new_page()
+    page.goto(BASE + "/index.html")
+    wait_for_map(page)
+    cdp = context.new_cdp_session(page)
+    box = page.locator("#map .geo").first.bounding_box()
+    cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+    def pinch(start_gap, end_gap, steps=12):
+        def points(gap):
+            return [{"x": cx - gap / 2, "y": cy, "id": 1}, {"x": cx + gap / 2, "y": cy, "id": 2}]
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": points(start_gap)})
+        for i in range(1, steps + 1):
+            gap = start_gap + (end_gap - start_gap) * i / steps
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": points(gap)})
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        settle(page, 600)
+
+    start_sampler(page)
+    pinch(100, 400)
+    zoomed = view(page)["scale"]
+    pinch(400, 40)
+    pinch(400, 40)
+    sampled = stop_sampler(page)
+    check("[touch] pinch out zooms in; pinch in stops at World; every frame inside the world",
+          zoomed > 2 and sampled["minScale"] >= 1 - 1e-6 and not sampled["violations"]
+          and same_view(view(page), preset("world")),
+          f"after pinch-out {zoomed:.2f}x, min {sampled['minScale']:.4f}, end {view(page)}, {sampled['violations'][:2]}")
+    context.close()
 
 
 def test_layout(browser):
@@ -551,6 +747,10 @@ def main():
             test_clamp(page)
             test_hover(page)
             context.close()
+            for scheme in ("light", "dark"):
+                test_view_limits(browser, scheme)
+            if name == "edge":
+                test_pinch(browser)
             test_layout(browser)
             test_themes(browser)
             browser.close()

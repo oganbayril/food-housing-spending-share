@@ -165,7 +165,11 @@ MAP_HEIGHT_CSS = "clamp(360px, 75vw, 620px)"
 GEO_LON_RANGE = [-180, 180]
 GEO_LAT_RANGE = [-58, 85]
 VIEWS = {
-    "world": {"scale": 1, "lon": 0, "lat": 13.5},
+    # World: the map centred in the frame. On this projection that puts
+    # latitude 10.793 at the centre (not 13.5, the plain average of 85 N and
+    # 58 S: latitudes are not evenly spaced vertically). Measured in the
+    # browser: the centre latitude after centring between 85 N and 58 S.
+    "world": {"scale": 1, "lon": 0, "lat": 10.793053},
     "europe": {"scale": 3.5, "lon": 8, "lat": 52},
 }
 
@@ -177,7 +181,7 @@ def view_relayout(name):
         "geo.projection.scale": view["scale"],
         "geo.center.lon": view["lon"],
         "geo.center.lat": view["lat"],
-        "geo.projection.rotation.lon": view["lon"],
+        "geo.projection.rotation.lon": 0,  # never rotated: panning moves the map
     }
 
 
@@ -401,7 +405,8 @@ def build_figure(table):
         resolution=50,  # the default 110m map has no Malta
         projection_type="natural earth",
         projection_scale=world["scale"],
-        projection_rotation_lon=world["lon"],
+        projection_rotation_lon=0,
+        projection_minscale=1,  # Plotly's own minimum zoom (World), an extra guard
         center=dict(lon=world["lon"], lat=world["lat"]),
         lonaxis_range=GEO_LON_RANGE,
         lataxis_range=GEO_LAT_RANGE,
@@ -591,81 +596,227 @@ PAGE_SCRIPT = """(function () {
     Plotly.relayout(map, theme.layout);
   }
 
-  // ---- views: presets and clamped zoom ------------------------------------
+  // ---- views: presets, zoom and pan -----------------------------------------
+  // Plotly redraws on every drag / wheel step BEFORE its layout or events
+  // change, so a limit applied afterwards always shows the bad frame first
+  // (the map shrinking below World, or wrapping past +-180 degrees). The page
+  // therefore does zoom and pan itself: Plotly's own drag / wheel handling is
+  // blocked, and every change passes through limitView() BEFORE it is drawn.
+  // Drawing uses the subplot's own fast path (render), as Plotly does.
+  var WHEEL_RATE = 0.002;       // Plotly / d3: scale x 2^(-deltaY x rate) per wheel event
+  var LAT_MAX = GEO_LAT[1], LAT_MIN = GEO_LAT[0];
+  var EDGE_LON = 179.999;       // the world's left / right edge (180 itself wraps to -180)
+
+  function subplot() { return map._fullLayout.geo._subplot; }
+  function frameBox(sp) {
+    var c = sp.clipRect.node();
+    return { x: +c.getAttribute("x"), y: +c.getAttribute("y"),
+             w: +c.getAttribute("width"), h: +c.getAttribute("height") };
+  }
+
+  // The only view that may be drawn:
+  // - never zoomed out beyond World (the fitted scale);
+  // - never rotated: panning moves the drawn map, it does not turn the globe;
+  // - the frame stays inside the world: no space beyond 85 N / 58 S, no space
+  //   beyond +-180 degrees at the visible latitudes farthest from the equator
+  //   (where the map is narrowest). Along an axis where the map is still
+  //   smaller than the frame (just above World scale), it is centred.
+  function limitView(sp) {
+    var p = sp.projection, box = frameBox(sp);
+    if (p.scale() < sp.fitScale) { p.scale(sp.fitScale); }
+    var r = p.rotate();
+    if (r[0] !== 0 || r[1] !== 0 || r[2] !== 0) { p.rotate([0, 0, 0]); }
+
+    var t = p.translate();
+    var yNorth = p([0, LAT_MAX])[1], ySouth = p([0, LAT_MIN])[1];
+    var top = box.y, bottom = box.y + box.h, dy = 0;
+    if (ySouth - yNorth <= box.h) { dy = (top + bottom) / 2 - (yNorth + ySouth) / 2; }
+    else if (yNorth > top) { dy = top - yNorth; }
+    else if (ySouth < bottom) { dy = bottom - ySouth; }
+    p.translate([t[0], t[1] + dy]);
+
+    t = p.translate();
+    var centreX = box.x + box.w / 2;
+    var latTop = Math.min(LAT_MAX, p.invert([centreX, top])[1]);
+    var latBottom = Math.max(LAT_MIN, p.invert([centreX, bottom])[1]);
+    var rows = [latTop, latBottom];
+    if (latTop > 0 && latBottom < 0) { rows.push(0); }
+    var left = -Infinity, right = Infinity;
+    rows.forEach(function (lat) {
+      left = Math.max(left, p([-EDGE_LON, lat])[0]);
+      right = Math.min(right, p([EDGE_LON, lat])[0]);
+    });
+    var dx = 0;
+    if (right - left <= box.w) { dx = centreX - (p([-EDGE_LON, 0])[0] + p([EDGE_LON, 0])[0]) / 2; }
+    else if (left > box.x) { dx = box.x - left; }
+    else if (right < box.x + box.w) { dx = box.x + box.w - right; }
+    p.translate([t[0] + dx, t[1]]);
+  }
+
+  // Write the drawn view into the layout WITHOUT a redraw (as Plotly does at
+  // the end of its own gestures), so Play, the slider and theme changes,
+  // which redraw from the layout, keep it.
+  function syncLayout(emit) {
+    var sp = subplot(), p = sp.projection, centre = p.invert(sp.midPt);
+    var values = { scale: p.scale() / sp.fitScale, lon: centre[0], lat: centre[1] };
+    [map.layout, map._fullLayout].forEach(function (layout) {
+      layout.geo = layout.geo || {};
+      layout.geo.projection = layout.geo.projection || {};
+      layout.geo.projection.scale = values.scale;
+      layout.geo.projection.rotation = layout.geo.projection.rotation || {};
+      layout.geo.projection.rotation.lon = 0;
+      layout.geo.center = layout.geo.center || {};
+      layout.geo.center.lon = values.lon;
+      layout.geo.center.lat = values.lat;
+    });
+    if (emit) {
+      map.emit("plotly_relayout", { "geo.projection.scale": values.scale, "geo.center.lon": values.lon,
+                                    "geo.center.lat": values.lat, "geo.projection.rotation.lon": 0 });
+    }
+  }
+  function atWorld(sp) { return sp.projection.scale() <= sp.fitScale * 1.0001; }
+  // Touch: at World scale a one-finger swipe scrolls the page; zoomed in it
+  // pans the map.
+  var mapFrame = document.querySelector(".map-frame");
+  function updateTouchMode(sp) { mapFrame.classList.toggle("zoomed", !atWorld(sp)); }
+  function draw(sp) {
+    limitView(sp);
+    sp.render(true);
+    syncLayout(false);
+    updateTouchMode(sp);
+  }
+
+  // Zoom by `factor` around a point (frame coordinates), limited first.
+  function zoomAt(point, factor) {
+    var sp = subplot(), p = sp.projection;
+    var k0 = p.scale(), k = Math.max(sp.fitScale, k0 * factor);
+    if (Math.abs(k - k0) < 1e-9) { return; }   // e.g. zooming out at World: nothing to do
+    var t = p.translate(), ratio = k / k0;
+    p.scale(k);
+    p.translate([point[0] - (point[0] - t[0]) * ratio, point[1] - (point[1] - t[1]) * ratio]);
+    draw(sp);
+  }
+  function panBy(dx, dy) {
+    var sp = subplot(), p = sp.projection, t = p.translate();
+    p.translate([t[0] + dx, t[1] + dy]);
+    draw(sp);
+  }
+  // Screen position -> the projection's frame coordinates.
+  function framePoint(sp, clientX, clientY) {
+    var rect = sp.framework.node().getBoundingClientRect(), box = frameBox(sp);
+    return [clientX - rect.left + box.x, clientY - rect.top + box.y];
+  }
+  function onMapArea(event) {
+    return event.target && event.target.closest && event.target.closest("#map .geo");
+  }
+
+  var gestureTimer = null;
+  function scheduleGestureEnd() {
+    window.clearTimeout(gestureTimer);
+    gestureTimer = window.setTimeout(function () { syncLayout(true); }, 250);
+  }
+
+  // Wheel: handled here, never by Plotly. At World scale a zoom-out is
+  // refused before anything is drawn.
+  map.addEventListener("wheel", function (event) {
+    if (!onMapArea(event)) { return; }
+    event.preventDefault();
+    event.stopPropagation();
+    var sp = subplot();
+    var delta = event.deltaY * (event.deltaMode ? 120 : 1);   // same units as Plotly / d3
+    if (delta > 0 && atWorld(sp)) { return; }
+    zoomAt(framePoint(sp, event.clientX, event.clientY), Math.pow(2, -delta * WHEEL_RATE));
+    scheduleGestureEnd();
+  }, { capture: true, passive: false });
+
+  // Drag (mouse, pen, one finger) and pinch (two fingers): handled here.
+  var pointers = {};
+  var pinchDistance = null;
+  function pointerList() { return Object.keys(pointers).map(function (id) { return pointers[id]; }); }
+  ["mousedown", "touchstart", "dblclick"].forEach(function (type) {
+    map.addEventListener(type, function (event) { if (onMapArea(event)) { event.stopPropagation(); } }, true);
+  });
+  map.addEventListener("pointerdown", function (event) {
+    if (!onMapArea(event)) { return; }
+    event.stopPropagation();
+    pointers[event.pointerId] = { x: event.clientX, y: event.clientY };
+    var list = pointerList();
+    if (list.length === 2) {
+      pinchDistance = Math.hypot(list[0].x - list[1].x, list[0].y - list[1].y);
+    }
+    if (!atWorld(subplot()) || list.length === 2) {
+      event.preventDefault();
+      try { event.target.setPointerCapture(event.pointerId); } catch (e) {}
+    }
+  }, true);
+  window.addEventListener("pointermove", function (event) {
+    var previous = pointers[event.pointerId];
+    if (!previous) { return; }
+    var current = { x: event.clientX, y: event.clientY };
+    pointers[event.pointerId] = current;
+    var list = pointerList(), sp = subplot();
+    if (list.length === 2 && pinchDistance) {
+      var distance = Math.hypot(list[0].x - list[1].x, list[0].y - list[1].y);
+      var middle = framePoint(sp, (list[0].x + list[1].x) / 2, (list[0].y + list[1].y) / 2);
+      zoomAt(middle, distance / pinchDistance);
+      pinchDistance = distance;
+    } else if (list.length === 1 && !atWorld(sp)) {
+      // Incremental: after pushing past an edge, reversing moves at once.
+      panBy(current.x - previous.x, current.y - previous.y);
+    }
+  });
+  function endPointer(event) {
+    if (!pointers[event.pointerId]) { return; }
+    delete pointers[event.pointerId];
+    if (pointerList().length < 2) { pinchDistance = null; }
+    if (pointerList().length === 0) { syncLayout(true); }
+  }
+  window.addEventListener("pointerup", endPointer);
+  window.addEventListener("pointercancel", endPointer);
+
+  // Presets and anything else that changes the view through Plotly (the
+  // reset button): Plotly redraws from the layout; this safety net then
+  // applies the same limits (normally a no-op).
   function relayoutFor(name) {
     var v = views[name];
-    return {
-      "geo.projection.scale": v.scale, "geo.center.lon": v.lon,
-      "geo.center.lat": v.lat, "geo.projection.rotation.lon": v.lon
-    };
+    return { "geo.projection.scale": v.scale, "geo.center.lon": v.lon,
+             "geo.center.lat": v.lat, "geo.projection.rotation.lon": 0 };
   }
   function currentView() {
-    var geo = map.layout.geo || {};
-    var projection = geo.projection || {};
-    var center = geo.center || {};
+    var geo = map.layout.geo || {}, projection = geo.projection || {}, center = geo.center || {};
     return {
       scale: projection.scale == null ? 1 : projection.scale,
       lon: center.lon == null ? views.world.lon : center.lon,
-      lat: center.lat == null ? views.world.lat : center.lat,
-      rotation: (projection.rotation || {}).lon == null ? 0 : projection.rotation.lon
+      lat: center.lat == null ? views.world.lat : center.lat
     };
   }
-  function limit(value, low, high) { return Math.min(Math.max(value, low), high); }
-  // The view that is allowed: never zoomed out beyond World; at World scale
-  // centred and not draggable; zoomed in, the centre stays far enough from
-  // the edges that the map cannot leave the frame (and is never rotated
-  // beyond panning: rotation follows the centre longitude).
-  function clampedView(view) {
-    var scale = Math.max(view.scale, 1);
-    if (scale <= 1.0001) {
-      return { scale: 1, lon: views.world.lon, lat: views.world.lat };
-    }
-    var halfLon = (GEO_LON[1] - GEO_LON[0]) / 2 / scale;
-    var halfLat = (GEO_LAT[1] - GEO_LAT[0]) / 2 / scale;
-    return {
-      scale: scale,
-      lon: limit(view.lon, GEO_LON[0] + halfLon, GEO_LON[1] - halfLon),
-      lat: limit(view.lat, GEO_LAT[0] + halfLat, GEO_LAT[1] - halfLat)
-    };
-  }
-  var clamping = false;
+  var settling = false;
   function enforceLimits() {
-    var now = currentView();
-    var allowed = clampedView(now);
-    var off = Math.abs(now.scale - allowed.scale) > 1e-6 || Math.abs(now.lon - allowed.lon) > 1e-6 ||
-              Math.abs(now.lat - allowed.lat) > 1e-6 || Math.abs(now.rotation - allowed.lon) > 1e-6;
-    if (off) {
-      clamping = true;
-      Plotly.relayout(map, {
-        "geo.projection.scale": allowed.scale, "geo.center.lon": allowed.lon,
-        "geo.center.lat": allowed.lat, "geo.projection.rotation.lon": allowed.lon
-      }).then(function () { clamping = false; markPreset(); },
-              function () { clamping = false; });
-    } else {
-      markPreset();
+    var sp = subplot(), p = sp.projection;
+    var before = [p.scale(), p.translate()[0], p.translate()[1]].concat(p.rotate());
+    limitView(sp);
+    var after = [p.scale(), p.translate()[0], p.translate()[1]].concat(p.rotate());
+    var changed = before.some(function (value, i) { return Math.abs(value - after[i]) > 1e-6; });
+    if (changed) {
+      settling = true;
+      sp.render(true);
+      syncLayout(true);
+      settling = false;
     }
+    updateTouchMode(sp);
+    markPreset();
   }
   function markPreset() {
     var now = currentView();
     document.querySelectorAll("[data-view]").forEach(function (button) {
       var v = views[button.dataset.view];
-      var same = Math.abs(now.scale - v.scale) < 1e-3 && Math.abs(now.lon - v.lon) < 1e-3 &&
-                 Math.abs(now.lat - v.lat) < 1e-3;
+      var same = Math.abs(now.scale - v.scale) < 1e-3 && Math.abs(now.lon - v.lon) < 1e-2 &&
+                 Math.abs(now.lat - v.lat) < 1e-2;
       button.setAttribute("aria-pressed", String(same));
     });
   }
   map.on("plotly_relayout", function () {
-    if (!clamping) { window.requestAnimationFrame(enforceLimits); }
-  });
-  // At World scale the map cannot be dragged: stop the press before it
-  // reaches Plotly's drag handler. (Plotly's own "no drag" setting would
-  // also switch scroll zoom off.) Scroll zoom and hover are not affected.
-  function blockDragAtWorld(event) {
-    var onMap = event.target && event.target.closest && event.target.closest("#map .geo");
-    if (onMap && currentView().scale <= 1.0001) { event.stopPropagation(); }
-  }
-  ["mousedown", "pointerdown", "touchstart"].forEach(function (type) {
-    map.addEventListener(type, blockDragAtWorld, true);
+    if (!settling) { enforceLimits(); }
   });
 
   // ---- legend layout by map width ------------------------------------------
@@ -738,10 +889,7 @@ PAGE_SCRIPT = """(function () {
   });
   document.querySelectorAll("[data-view]").forEach(function (button) {
     button.addEventListener("click", function () {
-      clamping = true;
-      Plotly.relayout(map, relayoutFor(button.dataset.view)).then(
-        function () { clamping = false; markPreset(); },
-        function () { clamping = false; });
+      Plotly.relayout(map, relayoutFor(button.dataset.view)).catch(function () {});
     });
   });
 
@@ -821,6 +969,11 @@ def page_html(fig, table):
      is set here; Plotly's own wrapper div must fill the frame too. */
   .map-frame {{ height: {MAP_HEIGHT_CSS}; }}
   .map-frame > div, .map-frame .plotly-graph-div {{ height: 100%; }}
+  /* Touch: at World scale a vertical swipe scrolls the page (pinch still
+     reaches the map); zoomed in, the map takes all touch gestures. */
+  .map-frame {{ touch-action: pan-y; }}
+  .map-frame.zoomed {{ touch-action: none; }}
+  .map-frame.zoomed .geo {{ cursor: grab; }}
   .segmented {{ display: inline-flex; border: 1px solid var(--border); border-radius: 6px;
                overflow: hidden; }}
   .segmented button {{ font: inherit; font-size: 0.85rem; padding: 4px 10px; border: 0;
@@ -944,7 +1097,7 @@ def save_png(fig, path, view_name):
     static.update_layout(width=1200, height=620)
     static.update_geos(
         projection_scale=view["scale"],
-        projection_rotation_lon=view["lon"],
+        projection_rotation_lon=0,
         center=dict(lon=view["lon"], lat=view["lat"]),
     )
     static.write_image(path, scale=2)
