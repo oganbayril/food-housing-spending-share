@@ -77,7 +77,11 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
 - [x] Thresholds kept (D16); near_tier_boundary column (post-hoc 1 pt); outlier candidates (D17).
 - [x] Draft map: `src/build_map.py` -> `site/index.html` + `images/map_2024.png` (not deployed).
 - [x] Map reviewed; Kosovo isolated, dark mode, caption, Europe PNG. README drafted.
-- [ ] Next: user reviews deploy/PLAN.md. Nothing on the VPS until approved.
+- [x] Deployed (phases A-E, 2026-10-08/09): https://food-housing-spending-share.duckdns.org (deploy/PLAN.md).
+- [x] Map: responsive height + legend layouts (uploaded 2026-10-10, fa0ccfa).
+- [x] Map: zoom/pan limited before drawing (79a207a), 155 browser checks. NOT uploaded yet.
+- [x] Phase D log fix in the real-estate repo (b16bf97): caddy-owned log, validate as caddy, never restart.
+- [ ] Next: user opens 79a207a locally, then upload site/index.html only (checksum diff, no reload).
 
 Pipeline order: `load_eurostat.py` -> `load_oecd.py` -> `combine_sources.py`
 -> `check_missing_values.py` (all in `src/`, run with `uv run python`).
