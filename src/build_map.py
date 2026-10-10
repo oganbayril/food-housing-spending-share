@@ -79,6 +79,37 @@ LEGEND_TITLE = (
     "as a % of household consumption spending"
 )
 
+# Legend layouts by map width (the page script picks one and re-picks on
+# resize). The world map is limited by WIDTH, so on narrower screens a legend
+# inside the map frame covers in-scope countries (Chile at 768 px, most of
+# the map at 375 px): there it goes above the map, where Plotly extends the
+# top margin for it. Wide: bottom-left, over the empty South Pacific.
+LEGEND_LAYOUTS = {
+    "side": {   # map 1000 px or wider
+        "names": TIER_ORDER,
+        "layout": {"legend.orientation": "v", "legend.x": 0.01, "legend.y": 0.06,
+                   "legend.xanchor": "left", "legend.yanchor": "bottom",
+                   "legend.title.text": LEGEND_TITLE, "legend.title.side": "top",
+                   "legend.entrywidthmode": "pixels", "legend.entrywidth": 0},
+    },
+    "top": {    # 600-999 px
+        "names": TIER_ORDER,
+        "layout": {"legend.orientation": "h", "legend.x": 0, "legend.y": 1,
+                   "legend.xanchor": "left", "legend.yanchor": "bottom",
+                   "legend.title.text": LEGEND_TITLE.replace("<br>", " "), "legend.title.side": "top",
+                   # two entries per row, wrapped inside the map's width
+                   "legend.entrywidthmode": "fraction", "legend.entrywidth": 0.5},
+    },
+    "compact": {  # under 600 px
+        "names": TIER_SHORT + [NO_DATA],
+        "layout": {"legend.orientation": "h", "legend.x": 0, "legend.y": 1,
+                   "legend.xanchor": "left", "legend.yanchor": "bottom",
+                   "legend.title.text": "<b>Essentials share</b> (% of household spending)",
+                   "legend.title.side": "top",
+                   "legend.entrywidthmode": "fraction", "legend.entrywidth": 0.5},
+    },
+}
+
 # Colours per theme. Light: the validated ramp light -> dark. Dark: the same
 # hue, validated against the dark surface, darkest step for "lower".
 THEMES = {
@@ -120,6 +151,10 @@ COVID_NOTE = (
     "Note for {year}: higher shares across many countries likely reflect lower "
     "spending on restaurants, travel and leisure during COVID-19 (cause not verified)."
 )
+
+# Map height: 75% of the viewport width, between 360 and 620 px, so the world
+# view is not a thin strip on phones and not oversized on wide screens.
+MAP_HEIGHT_CSS = "clamp(360px, 75vw, 620px)"
 
 # Views. Lon/lat ranges stay at the world; a view is scale + centre (+ the
 # matching rotation, which is how Plotly pans this projection). Scale 1 is
@@ -389,7 +424,8 @@ def build_figure(table):
         plot_bgcolor=LIGHT["surface"],
         font=dict(family='system-ui, -apple-system, "Segoe UI", sans-serif', color=LIGHT["text"]),
         margin=dict(l=10, r=10, t=10, b=10),
-        height=620,
+        # No fixed height: the map div's CSS height (MAP_HEIGHT_CSS) decides,
+        # and Plotly fills it (config "responsive"). PNGs set their own size.
         # Must stay "pan": with dragmode off, Plotly also turns scroll zoom off.
         # Dragging at World scale is blocked by the page script instead.
         dragmode="pan",
@@ -632,6 +668,28 @@ PAGE_SCRIPT = """(function () {
     map.addEventListener(type, blockDragAtWorld, true);
   });
 
+  // ---- legend layout by map width ------------------------------------------
+  var legendLayouts = __LEGENDS__;
+  var legendMode = "side";
+  function legendModeFor(width) {
+    if (width >= 1000) { return "side"; }
+    if (width >= 600) { return "top"; }
+    return "compact";
+  }
+  function fitLegend() {
+    var mode = legendModeFor(map.clientWidth);
+    if (mode === legendMode) { return; }
+    legendMode = mode;
+    var chosen = legendLayouts[mode];
+    Plotly.restyle(map, { name: chosen.names }, [4, 5, 6, 7]);
+    Plotly.relayout(map, chosen.layout);
+  }
+  var resizeTimer = null;
+  window.addEventListener("resize", function () {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(fitLegend, 150);
+  });
+
   // ---- years: note, Play / Pause -------------------------------------------
   var years = __YEARS__;
   var currentYear = __DEFAULT_YEAR__;
@@ -692,6 +750,7 @@ PAGE_SCRIPT = """(function () {
   window.initMap = function () {
     showYear(__DEFAULT_YEAR__);
     applyTheme(storedChoice());
+    fitLegend();
     markPreset();
   };
   if (window.mapDrawn) { window.initMap(); }
@@ -707,6 +766,7 @@ def page_script():
         "__GEO_LAT__": json.dumps(GEO_LAT_RANGE),
         "__DEFAULT_YEAR__": str(MAP_DEFAULT_YEAR),
         "__YEARS__": json.dumps(list(range(FIRST_YEAR, MAP_LAST_YEAR + 1))),
+        "__LEGENDS__": json.dumps(LEGEND_LAYOUTS),
     }
     script = PAGE_SCRIPT
     for placeholder, value in replacements.items():
@@ -757,6 +817,10 @@ def page_html(fig, table):
   h1 {{ font-size: 1.5rem; margin: 0.25rem 0; flex: 1 1 20rem; }}
   .lede, .caption {{ color: var(--text-2); margin: 0 0 0.75rem; }}
   .caption {{ font-size: 0.9rem; }}
+  /* The map's height. Plotly (responsive) fills its parent, so the height
+     is set here; Plotly's own wrapper div must fill the frame too. */
+  .map-frame {{ height: {MAP_HEIGHT_CSS}; }}
+  .map-frame > div, .map-frame .plotly-graph-div {{ height: 100%; }}
   .segmented {{ display: inline-flex; border: 1px solid var(--border); border-radius: 6px;
                overflow: hidden; }}
   .segmented button {{ font: inherit; font-size: 0.85rem; padding: 4px 10px; border: 0;
@@ -799,7 +863,9 @@ total household consumption spending. Fixed thresholds, the same for every count
   </div>
   <p class="year-note" id="year-note" aria-live="polite"></p>
 </div>
+<div class="map-frame">
 {figure_html}
+</div>
 <ul>
   <li>Official statistics from Eurostat and the OECD.
       <a href="shares.csv" download>Download the data (CSV)</a>.</li>

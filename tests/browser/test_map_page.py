@@ -12,8 +12,10 @@ deploy/food-housing.caddy, then checks, in each browser:
   clamp      scroll out 50x stays at World; no dragging at World scale;
              zoomed into the Balkans, Play and the slider keep the view;
              dragging stays inside the bounds; Europe / World reset
-  layout     view buttons and theme toggle never overlap the Plotly
-             toolbar at 375, 768 and 1280 px wide
+  layout     view buttons, Play and theme toggle never overlap the Plotly
+             toolbar at 375, 768 and 1280 px wide; map height is
+             clamp(360px, 75vw, 620px); World and Europe framing at each width;
+             the legend covers no in-scope country (above the map below 1000 px)
   theme      System (light and dark OS), Light, Dark: page, land, tiers
              and legend use that theme's colours after a year change, Play,
              Europe and World; the choice survives a reload
@@ -56,6 +58,23 @@ EUROPE_MUST_SHOW = {
     "western Portugal": (-9.4, 38.8),
     "Cyprus": (33.0, 34.9),
     "eastern Turkey": (44.5, 39.5),
+}
+# Places that must be inside the World view: the corners of the project's scope.
+WORLD_MUST_SHOW = {
+    "western Alaska": (-165.0, 64.0),
+    "southern Chile": (-71.0, -52.0),
+    "Japan": (140.0, 36.0),
+    "New Zealand": (174.0, -41.0),
+    "North Cape": (25.8, 71.1),
+}
+# In-scope countries near the map edges that a legend could cover.
+LEGEND_MUST_NOT_COVER = {
+    "southern Chile": (-71.0, -48.0),
+    "northern Chile": (-70.0, -22.0),
+    "Colombia": (-74.0, 4.0),
+    "Mexico": (-102.0, 23.0),
+    "Australia": (134.0, -25.0),
+    "New Zealand": (172.0, -42.0),
 }
 BALKANS = (20.5, 43.5)
 
@@ -385,19 +404,72 @@ def test_layout(browser):
         page.locator("#map").hover()
         settle(page, 400)
         boxes = page.evaluate("""() => {
-            const r = s => { const e = document.querySelector(s); if (!e) return null;
-                             const b = e.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; };
-            return {modebar: r('#map .modebar'), views: r('.map-tools .segmented'),
-                    theme: r('header .segmented'), map: r('#map')}; }""")
+            const box = e => { const b = e.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; };
+            const r = s => { const e = document.querySelector(s); return e ? box(e) : null; };
+            return {modebar: r('#map .modebar'), map: r('#map'), theme: r('header .segmented'),
+                    tools: Array.from(document.querySelectorAll('.map-tools .segmented')).map(box)}; }""")
 
         def overlap(a, b):
             return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
 
-        ok = boxes["modebar"] and not overlap(boxes["views"], boxes["modebar"]) \
-            and not overlap(boxes["theme"], boxes["modebar"])
-        left = boxes["views"][0] - boxes["map"][0] < 40
-        check(f"{width}px: World/Europe and theme toggle clear of the toolbar; view buttons top-left",
-              ok and left, json.dumps(boxes))
+        clear = boxes["modebar"] is not None and not overlap(boxes["theme"], boxes["modebar"])
+        for tool in boxes["tools"]:
+            clear = clear and not overlap(tool, boxes["modebar"])
+        left = boxes["tools"][0][0] - boxes["map"][0] < 40
+        check(f"{width}px: World/Europe, Play and theme toggle clear of the toolbar; view buttons top-left",
+              clear and left and len(boxes["tools"]) == 2, json.dumps(boxes))
+
+        expected = min(620, max(360, round(0.75 * width)))
+        height = round(boxes["map"][3] - boxes["map"][1])
+        plotly_height = page.evaluate("document.getElementById('map')._fullLayout.height")
+        check(f"{width}px: map height is clamp(360px, 75vw, 620px) = {expected}px",
+              abs(height - expected) <= 1 and abs(plotly_height - expected) <= 1,
+              f"div {height}px, Plotly {plotly_height}px")
+
+        click_view(page, "world")
+        outside = []
+        for place, (lon, lat) in WORLD_MUST_SHOW.items():
+            if not screen_point(page, lon, lat)["inside"]:
+                outside.append(place)
+        check(f"{width}px: World view shows the whole scope (Alaska to New Zealand, Chile)",
+              not outside, f"outside: {outside}")
+        legend = page.evaluate("""() => { const b = document.querySelector('#map .legend').getBoundingClientRect();
+            return [b.left, b.top, b.right, b.bottom]; }""")
+        covered = []
+        for place, (lon, lat) in LEGEND_MUST_NOT_COVER.items():
+            point = screen_point(page, lon, lat)
+            if legend[0] <= point["x"] <= legend[2] and legend[1] <= point["y"] <= legend[3]:
+                covered.append(place)
+        frame_top = page.evaluate("""() => document.getElementById('map')._fullLayout.geo._subplot
+            .framework.node().getBoundingClientRect().top""")
+        above = width >= 1000 or legend[3] <= frame_top + 1
+        check(f"{width}px: legend covers no in-scope country" + ("" if width >= 1000 else ", sits above the map"),
+              not covered and above and len(legend_entries(page)) == 4,
+              f"covered {covered}, legend {legend}, map top {frame_top}, entries {legend_entries(page)}")
+        # Each entry fully visible: inside the map area, not overlapping another entry.
+        items = page.evaluate("""() => Array.from(document.querySelectorAll('#map .legend .traces')).map(e => {
+            const b = e.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; })""")
+        map_box = boxes["map"]
+        clipped = [i for i, b in enumerate(items)
+                   if b[0] < map_box[0] - 1 or b[2] > map_box[2] + 1 or b[1] < map_box[1] - 1 or b[3] > map_box[3] + 1]
+        # Real overlap only: more than 2 px in both directions. Firefox gives
+        # each entry a 1-px edge, so neighbouring entries share one pixel.
+        def real_overlap(a, b):
+            return min(a[2], b[2]) - max(a[0], b[0]) > 2 and min(a[3], b[3]) - max(a[1], b[1]) > 2
+
+        overlapping = [(i, j) for i in range(len(items)) for j in range(i + 1, len(items))
+                       if real_overlap(items[i], items[j])]
+        check(f"{width}px: all 4 legend entries fully visible (inside the map area, no overlaps)",
+              len(items) == 4 and not clipped and not overlapping,
+              f"clipped {clipped}, overlapping {overlapping}, items {items}")
+
+        click_view(page, "europe")
+        outside = []
+        for place, (lon, lat) in EUROPE_MUST_SHOW.items():
+            if not screen_point(page, lon, lat)["inside"]:
+                outside.append(place)
+        check(f"{width}px: Europe view shows Iceland, North Cape, Portugal, Cyprus, eastern Turkey",
+              not outside, f"outside: {outside}")
         context.close()
 
 
