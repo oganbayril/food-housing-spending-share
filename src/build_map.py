@@ -715,11 +715,24 @@ PAGE_SCRIPT = """(function () {
   // pans the map.
   var mapFrame = document.querySelector(".map-frame");
   function updateTouchMode(sp) { mapFrame.classList.toggle("zoomed", !atWorld(sp)); }
+  // The view (projection) is updated and limited at once for every input
+  // event: that is only arithmetic. Redrawing the map is the expensive part
+  // (every country outline is projected again), so it happens at most once
+  // per screen frame, for the latest view; in-between views are never drawn.
+  // The layout is written at once too (also cheap), so a year change during
+  // a gesture redraws at the newest view.
+  var renderPending = false;
   function draw(sp) {
     limitView(sp);
-    sp.render(true);
     syncLayout(false);
-    updateTouchMode(sp);
+    if (renderPending) { return; }
+    renderPending = true;
+    window.requestAnimationFrame(function () {
+      renderPending = false;
+      var current = subplot();
+      current.render(true);
+      updateTouchMode(current);
+    });
   }
 
   // Zoom by `factor` around a point (frame coordinates), limited first.
@@ -809,6 +822,45 @@ PAGE_SCRIPT = """(function () {
   }
   window.addEventListener("pointerup", endPointer);
   window.addEventListener("pointercancel", endPointer);
+
+  // Tap -> tooltip on touch screens. Plotly shows its tooltip on mousemove.
+  // A finger tap normally produces one, but not when zoomed in: there the
+  // pointerdown above is preventDefault-ed (so a drag pans the map instead
+  // of scrolling the page), and that also cancels the browser's mouse events
+  // for the touch. So the page tells Plotly about the tap itself.
+  // A tap = one finger, released within TAP_MS, moved at most TAP_PX.
+  var TAP_MS = 500, TAP_PX = 10;
+  var touchStart = null;
+  map.addEventListener("pointerdown", function (event) {
+    if (event.pointerType !== "touch" || !onMapArea(event)) { return; }
+    // a second finger makes it a pinch, not a tap
+    touchStart = event.isPrimary ? { x: event.clientX, y: event.clientY, time: event.timeStamp, moved: 0 } : null;
+  }, true);
+  window.addEventListener("pointermove", function (event) {
+    if (!touchStart || !event.isPrimary || event.pointerType !== "touch") { return; }
+    touchStart.moved = Math.max(touchStart.moved,
+      Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y));
+  });
+  window.addEventListener("pointerup", function (event) {
+    var start = touchStart;
+    touchStart = null;
+    if (!start || !event.isPrimary || event.pointerType !== "touch") { return; }
+    if (event.timeStamp - start.time > TAP_MS || start.moved > TAP_PX) { return; }
+    // On the next frame, after the browser's own events for the touch (some
+    // browsers send a mouseout at the end of a tap, which hides the tooltip).
+    var x = event.clientX, y = event.clientY;
+    window.requestAnimationFrame(function () {
+      var target = document.elementFromPoint(x, y);
+      if (!target) { return; }
+      target.dispatchEvent(new MouseEvent("mousemove", {
+        clientX: x, clientY: y, bubbles: true, cancelable: true, view: window
+      }));
+    });
+  });
+  // A tap outside the map closes the tooltip.
+  document.addEventListener("pointerdown", function (event) {
+    if (event.pointerType === "touch" && !onMapArea(event)) { Plotly.Fx.unhover(map); }
+  }, true);
 
   // Presets and anything else that changes the view through Plotly (the
   // reset button): Plotly redraws from the layout; this safety net then

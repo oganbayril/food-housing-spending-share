@@ -20,6 +20,9 @@ deploy/food-housing.caddy, then checks, in each browser:
              and legend use that theme's colours after a year change, Play,
              Europe and World; the choice survives a reload
   hover      the live tooltip for Germany matches the page data
+  phone      (Edge, Android-like emulation) a tap on a country shows its
+             tooltip at World, 2x and 4x; a tap on the sea or outside the map
+             closes it; a swipe at World scrolls the page; zoomed, a drag pans
 
 Run from the project root, after src/build_map.py:
     uv run --with playwright --with pillow python tests/browser/test_map_page.py
@@ -731,6 +734,110 @@ def test_pinch(browser):
     context.close()
 
 
+PHONE = {"viewport": {"width": 412, "height": 915}, "device_scale_factor": 2.625,
+         "is_mobile": True, "has_touch": True}
+
+
+def point_inside(page, iso):
+    """A screen point inside the country's shape (not just its bounding box), or None."""
+    return page.evaluate("""(iso) => {
+        for (const el of document.querySelectorAll('#map .choroplethlocation')) {
+            if (!el.__data__ || el.__data__.loc !== iso) continue;
+            const b = el.getBoundingClientRect(), toLocal = el.getScreenCTM().inverse();
+            for (let fx = 0.3; fx <= 0.7; fx += 0.05) for (let fy = 0.3; fy <= 0.7; fy += 0.05) {
+                const x = b.x + b.width * fx, y = b.y + b.height * fy;
+                if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
+                if (el.isPointInFill(new DOMPoint(x, y).matrixTransform(toLocal))) return [x, y];
+            }
+        }
+        return null; }""", iso)
+
+
+def tooltip_text(page):
+    shown = page.locator(".hoverlayer .hovertext")
+    return shown.first.text_content() if shown.count() else None
+
+
+def touch_drag(cdp, start, end, steps=10):
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": start[0], "y": start[1]}]})
+    for i in range(1, steps + 1):
+        x = start[0] + (end[0] - start[0]) * i / steps
+        y = start[1] + (end[1] - start[1]) * i / steps
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x, "y": y}]})
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+
+
+def test_touch_tap(browser):
+    """Edge only (Playwright's phone emulation is Chromium-only): Android-like
+    phone, real touch taps. A tap on a country shows its tooltip at World
+    scale and zoomed in; a tap on the sea or outside the map closes it. A
+    one-finger swipe at World scrolls the page; zoomed in it pans the map and
+    opens no tooltip."""
+    context = browser.new_context(**PHONE)
+    page = context.new_page()
+    page.goto(BASE + "/index.html")
+    wait_for_map(page)
+    cdp = context.new_cdp_session(page)
+    for zoom in (1, 2, 4):
+        label = "World" if zoom == 1 else f"{zoom}x"
+        if zoom == 1:
+            click_view(page, "world")
+        else:
+            set_zoom(page, zoom, lon=10, lat=50)
+        page.locator("#map").scroll_into_view_if_needed()
+        settle(page, 400)
+        point = point_inside(page, "DEU")
+        if point is None:
+            check(f"[phone] {label}: tap on Germany shows its tooltip", False, "no point on Germany")
+            continue
+        page.touchscreen.tap(*point)
+        settle(page, 500)
+        text = tooltip_text(page) or ""
+        check(f"[phone] {label}: tap on Germany shows its tooltip",
+              text.startswith("Germany, 2024") and "Essentials" in text, text[:60] or "no tooltip")
+        sea = screen_point(page, -30.0, 45.0) if zoom == 1 else screen_point(page, 4.0, 55.0)  # Atlantic / North Sea
+        page.touchscreen.tap(sea["x"], sea["y"])
+        settle(page, 500)
+        check(f"[phone] {label}: tap on the sea closes it", tooltip_text(page) is None, tooltip_text(page) or "")
+        page.touchscreen.tap(*point)
+        settle(page, 500)
+        caption = page.locator("h1").first.bounding_box()
+        page.touchscreen.tap(caption["x"] + 5, caption["y"] + caption["height"] / 2)
+        settle(page, 500)
+        check(f"[phone] {label}: tap outside the map closes it", tooltip_text(page) is None, tooltip_text(page) or "")
+
+    # World: a one-finger swipe up scrolls the page, the map stays at World.
+    click_view(page, "world")
+    page.evaluate("window.scrollTo(0, 0)")
+    settle(page, 400)
+    box = page.locator("#map .geo").first.bounding_box()
+    cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    touch_drag(cdp, (cx, cy + 60), (cx, cy - 140))
+    settle(page, 600)
+    scrolled = page.evaluate("window.scrollY")
+    check("[phone] World: a one-finger swipe scrolls the page, the map stays at World",
+          scrolled > 50 and same_view(view(page), preset("world")), f"scrollY {scrolled}, view {view(page)}")
+
+    # Zoomed: a one-finger drag pans the map, the page does not scroll, no tooltip.
+    set_zoom(page, 4, lon=10, lat=50)
+    page.locator("#map").scroll_into_view_if_needed()
+    settle(page, 400)
+    sea = screen_point(page, 4.0, 55.0)
+    page.touchscreen.tap(sea["x"], sea["y"])  # make sure no tooltip is open
+    settle(page, 300)
+    before, scroll_before = view(page), page.evaluate("window.scrollY")
+    box = page.locator("#map .geo").first.bounding_box()
+    cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    touch_drag(cdp, (cx + 60, cy), (cx - 60, cy))
+    settle(page, 600)
+    after, scroll_after = view(page), page.evaluate("window.scrollY")
+    check("[phone] 4x: a one-finger drag pans the map, not the page, and opens no tooltip",
+          after["lon"] > before["lon"] + 1 and abs(scroll_after - scroll_before) < 1 and tooltip_text(page) is None,
+          f"lon {before['lon']:.2f} -> {after['lon']:.2f}, scrollY {scroll_before} -> {scroll_after}, "
+          f"tooltip {tooltip_text(page)!r}")
+    context.close()
+
+
 def test_layout(browser):
     for width in (375, 768, 1280):
         context = browser.new_context(viewport={"width": width, "height": 900})
@@ -891,6 +998,7 @@ def main():
                 test_view_limits(browser, scheme)
             if name == "edge":
                 test_pinch(browser)
+                test_touch_tap(browser)
             test_layout(browser)
             test_themes(browser)
             browser.close()
