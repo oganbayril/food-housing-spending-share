@@ -16,3 +16,6 @@ wheels/
 # Processed data IS committed so results are visible without running anything.
 data/raw/*
 !data/raw/.gitkeep
+
+# Personal study notes, never committed
+WHY.md
