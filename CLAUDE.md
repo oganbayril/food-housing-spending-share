@@ -82,6 +82,9 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
 - [x] Map: zoom/pan limited before drawing (79a207a); pan margins past the edges (PAN_MARGINS), 171 browser checks.
 - [x] Phase D log fix in the real-estate repo (b16bf97): caddy-owned log, validate as caddy, never restart.
 - [x] Uploaded the pan-margin build (index.html only, checksum diff, no reload).
+- [x] Phone: tap shows tooltip when zoomed (01ff6c1), one redraw per frame; 182 checks;
+  uploaded 2026-10-11. Lag cause: each redraw re-projects all outlines (~0.45 s at 4x).
+  Options A (precision 0) / B (transform during gesture) NOT built: user tests on phone first.
 
 Pipeline order: `load_eurostat.py` -> `load_oecd.py` -> `combine_sources.py`
 -> `check_missing_values.py` (all in `src/`, run with `uv run python`).
