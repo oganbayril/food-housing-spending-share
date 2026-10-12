@@ -5,6 +5,7 @@ Output:
                                 are loaded from Plotly's CDN, so it needs internet)
 - site/shares.csv               the processed data, as a download
 - site/favicon.svg              small icon (avoids a favicon.ico 404)
+- site/og-image.png             link-preview image (Open Graph), Europe, 1200 x 630
 - images/map_2024.png           static image, world view, light theme (README)
 - images/map_2024_europe.png    static image, Europe view, light theme (README)
 
@@ -40,6 +41,7 @@ Run from the project root, after src/combine_sources.py:
 
 import base64
 import hashlib
+import html
 import json
 import re
 import shutil
@@ -60,6 +62,27 @@ from tier_checks import assign_tier
 
 SITE_DIR = PROJECT_ROOT / "site"
 IMAGES_DIR = PROJECT_ROOT / "images"
+
+# Where the page lives and where its code lives. Link previews (Open Graph)
+# need ABSOLUTE https URLs: LinkedIn, WhatsApp, Telegram and X fetch the tags
+# without knowing which page they came from. REPO_URL is the git remote
+# (origin) without ".git"; the browser test checks they still match.
+SITE_URL = "https://food-housing-spending-share.duckdns.org/"
+REPO_URL = "https://github.com/oganbayril/food-housing-spending-share"
+HEADLINE = "How much of household spending goes to food and housing"
+SHARE_DESCRIPTION = (
+    "Food and housing & utilities as a share of household consumption spending in OECD and "
+    "European countries, 1995-2024, on an interactive map."
+)
+OG_IMAGE = "og-image.png"
+OG_SIZE = (1200, 630)   # the size LinkedIn, WhatsApp, Telegram and X expect for a large card
+OG_HEADER_PX = 160      # headline band above the map
+OG_LON_RANGE = [-46, 66]   # the map's box: Iceland to eastern Turkey ...
+OG_LAT_RANGE = [33, 72]    # ... Cyprus / Crete to North Cape
+OG_IMAGE_ALT = (
+    "Map of Europe shaded in three blue tiers by the share of household spending "
+    f"on food and housing in {MAP_DEFAULT_YEAR}."
+)
 
 # Countries in the data that the base map cannot draw (DATA_NOTES L4).
 NOT_MAPPABLE = {"XKX"}
@@ -1011,6 +1034,29 @@ def page_script():
     return script
 
 
+def share_tags():
+    """<meta> tags for link previews (Open Graph, read by LinkedIn, WhatsApp,
+    Telegram; X reads twitter:card and falls back to og:*) and for search
+    engines (description). They go after the CSP <meta>, which must stay first."""
+    image_url = SITE_URL + OG_IMAGE
+    tags = [
+        ("name", "description", SHARE_DESCRIPTION),
+        ("property", "og:type", "website"),
+        ("property", "og:url", SITE_URL),
+        ("property", "og:title", HEADLINE),
+        ("property", "og:description", SHARE_DESCRIPTION),
+        ("property", "og:image", image_url),
+        ("property", "og:image:width", str(OG_SIZE[0])),
+        ("property", "og:image:height", str(OG_SIZE[1])),
+        ("property", "og:image:alt", OG_IMAGE_ALT),
+        ("name", "twitter:card", "summary_large_image"),
+    ]
+    lines = []
+    for attribute, key, value in tags:
+        lines.append(f'<meta {attribute}="{key}" content="{html.escape(value, quote=True)}">')
+    return "\n".join(lines)
+
+
 def page_html(fig, table):
     """The page: header with theme toggle, caption, view buttons, map, notes."""
     # post_script runs once Plotly has finished drawing the map (including
@@ -1032,6 +1078,7 @@ def page_html(fig, table):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Food & Housing Spending Share</title>
+{share_tags()}
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <script>{EARLY_THEME_SCRIPT}</script>
 <style>
@@ -1080,7 +1127,7 @@ def page_html(fig, table):
 <body>
 <main>
 <header>
-<h1>How much of household spending goes to food and housing</h1>
+<h1>{HEADLINE}</h1>
 <div class="segmented" role="group" aria-label="Colour theme">
   <button type="button" data-theme-button="system" aria-pressed="true">System</button>
   <button type="button" data-theme-button="light" aria-pressed="false">Light</button>
@@ -1110,7 +1157,8 @@ total household consumption spending. Fixed thresholds, the same for every count
 </div>
 <ul>
   <li>Official statistics from Eurostat and the OECD.
-      <a href="shares.csv" download>Download the data (CSV)</a>.</li>
+      <a href="shares.csv" download>Download the data (CSV)</a>.
+      <a href="{REPO_URL}" data-source-link>Source code</a> (method and data decisions included).</li>
   <li>Scroll to zoom; drag to move once zoomed in. World and Europe reset the view.</li>
   <li>Not an affordability or overburden measure: it compares spending shares, not costs
       against income.</li>
@@ -1192,6 +1240,55 @@ def save_png(fig, path, view_name):
     static.write_image(path, scale=2)
 
 
+def save_og_image(fig, path):
+    """Link-preview image: Europe view, light theme, headline, 1200 x 630.
+
+    LinkedIn shows the card about 300 px wide (1/4 scale), so the text is
+    large: a 52 px headline is ~13 px there. Short tier names in the legend.
+    """
+    width, height = OG_SIZE
+    top = OG_HEADER_PX
+    plot_height = height - top
+    static = go.Figure(data=fig.data, layout=fig.layout)
+    static.layout.sliders = ()
+    for index, name in zip(range(4, 8), TIER_SHORT + [NO_DATA]):
+        static.data[index].name = name
+    # The map is fitted to Europe's own box (not zoomed into the world map):
+    # Plotly fits the world into a frame of the world's shape, which in a wide,
+    # short image leaves empty strips left and right.
+    static.update_geos(
+        projection_scale=1,
+        projection_rotation_lon=0,
+        lonaxis_range=OG_LON_RANGE,
+        lataxis_range=OG_LAT_RANGE,
+        center=dict(lon=sum(OG_LON_RANGE) / 2, lat=sum(OG_LAT_RANGE) / 2),
+        domain=dict(x=[0, 1], y=[0, 1]),
+    )
+    static.update_layout(
+        width=width,
+        height=height,
+        margin=dict(l=0, r=0, t=top, b=0),
+        annotations=[
+            # y in "paper" units (1 = top of the map): 18 px below the image's top edge
+            dict(text=f"<b>{HEADLINE.replace(' goes to', '<br>goes to')}</b>",
+                 x=0.03, y=1 + (top - 18) / plot_height, xref="paper", yref="paper",
+                 yanchor="top", xanchor="left", align="left", showarrow=False,
+                 font=dict(size=52, color=LIGHT["text"])),
+        ],
+        # Lower left, over the Atlantic: no in-scope country there.
+        legend=dict(
+            title=dict(text=f"<b>{MAP_DEFAULT_YEAR}</b>: food + housing,<br>% of household spending",
+                       side="top", font=dict(size=22, color=LIGHT["text"])),
+            orientation="v", x=0.01, y=0.03, xanchor="left", yanchor="bottom",
+            font=dict(size=22, color=LIGHT["text"]), bgcolor=LIGHT["legend_bg"],
+            entrywidthmode="pixels", entrywidth=0, itemsizing="constant",
+        ),
+    )
+    for index in range(4, 8):
+        static.data[index].marker.size = 18
+    static.write_image(path, width=width, height=height, scale=1)
+
+
 def main():
     table = country_year_table()
     years = sorted(table["year"].unique())
@@ -1211,6 +1308,8 @@ def main():
     (SITE_DIR / "favicon.svg").write_text(FAVICON_SVG, encoding="utf-8", newline="\n")
     shutil.copyfile(PROCESSED_DIR / "shares.csv", SITE_DIR / "shares.csv")
     print(f"Copied shares.csv to {SITE_DIR}")
+    save_og_image(fig, SITE_DIR / OG_IMAGE)
+    print(f"Saved {SITE_DIR / OG_IMAGE} ({(SITE_DIR / OG_IMAGE).stat().st_size / 1e3:.0f} kB)")
 
     for suffix, view_name in [("", "world"), ("_europe", "europe")]:
         png_path = IMAGES_DIR / f"map_{MAP_DEFAULT_YEAR}{suffix}.png"

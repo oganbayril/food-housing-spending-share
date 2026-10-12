@@ -20,6 +20,9 @@ deploy/food-housing.caddy, then checks, in each browser:
              and legend use that theme's colours after a year change, Play,
              Europe and World; the choice survives a reload
   hover      the live tooltip for Germany matches the page data
+  preview    Open Graph / twitter / description tags with absolute https
+             URLs, after the CSP meta; og-image.png is a 1200x630 PNG under
+             1 MB; the "Source code" link points to the git remote and works
   phone      (Edge, Android-like emulation) a tap on a country shows its
              tooltip at World, 2x and 4x; a tap on the sea or outside the map
              closes it; a swipe at World scrolls the page; zoomed, a drag pans
@@ -30,20 +33,27 @@ Run from the project root, after src/build_map.py:
 """
 
 import http.server
+import io
 import json
 import re
+import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
+from PIL import Image
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "site"
 sys.path.insert(0, str(ROOT / "src"))
-from build_map import PAN_MARGINS, THEMES, TIER_ORDER, VIEWS, tier_colors  # noqa: E402
+from build_map import (  # noqa: E402
+    OG_IMAGE, PAN_MARGINS, SITE_URL, THEMES, TIER_ORDER, VIEWS, tier_colors,
+)
 
 PORT = 8770
 BASE = f"http://127.0.0.1:{PORT}"
@@ -767,6 +777,14 @@ def touch_drag(cdp, start, end, steps=10):
     cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
 
 
+def tap_view(page, name):
+    """Phone tests use touch only. A mouse click would leave an emulated mouse
+    cursor on the button, and Chromium moves hover back to that cursor after
+    every touch tap, which closes the map's tooltip. A phone has no cursor."""
+    page.locator(f'[data-view="{name}"]').tap()
+    settle(page)
+
+
 def test_touch_tap(browser):
     """Edge only (Playwright's phone emulation is Chromium-only): Android-like
     phone, real touch taps. A tap on a country shows its tooltip at World
@@ -781,7 +799,7 @@ def test_touch_tap(browser):
     for zoom in (1, 2, 4):
         label = "World" if zoom == 1 else f"{zoom}x"
         if zoom == 1:
-            click_view(page, "world")
+            tap_view(page, "world")
         else:
             set_zoom(page, zoom, lon=10, lat=50)
         page.locator("#map").scroll_into_view_if_needed()
@@ -791,10 +809,20 @@ def test_touch_tap(browser):
             check(f"[phone] {label}: tap on Germany shows its tooltip", False, "no point on Germany")
             continue
         page.touchscreen.tap(*point)
-        settle(page, 500)
-        text = tooltip_text(page) or ""
+        # Poll: on a busy machine the tooltip waits for the frame after the tap,
+        # which can sit behind a map redraw. The time taken is reported.
+        started = time.perf_counter()
+        text = ""
+        while time.perf_counter() - started < 3:
+            text = tooltip_text(page) or ""
+            if text:
+                break
+            page.wait_for_timeout(50)
+        waited = time.perf_counter() - started
+        settle(page, 300)
         check(f"[phone] {label}: tap on Germany shows its tooltip",
-              text.startswith("Germany, 2024") and "Essentials" in text, text[:60] or "no tooltip")
+              text.startswith("Germany, 2024") and "Essentials" in text,
+              f"{text[:40] or 'no tooltip'} after {waited:.2f} s")
         sea = screen_point(page, -30.0, 45.0) if zoom == 1 else screen_point(page, 4.0, 55.0)  # Atlantic / North Sea
         page.touchscreen.tap(sea["x"], sea["y"])
         settle(page, 500)
@@ -807,7 +835,7 @@ def test_touch_tap(browser):
         check(f"[phone] {label}: tap outside the map closes it", tooltip_text(page) is None, tooltip_text(page) or "")
 
     # World: a one-finger swipe up scrolls the page, the map stays at World.
-    click_view(page, "world")
+    tap_view(page, "world")
     page.evaluate("window.scrollTo(0, 0)")
     settle(page, 400)
     box = page.locator("#map .geo").first.bounding_box()
@@ -974,6 +1002,68 @@ def test_hover(page):
           text.startswith("Germany, 2024") and "Essentials" in text and "Eurostat, COICOP 2018" in text, text[:120])
 
 
+def git_remote_url():
+    """The repo's GitHub URL from the git remote (origin), without ".git"."""
+    url = subprocess.run(["git", "remote", "get-url", "origin"], cwd=ROOT, capture_output=True,
+                         text=True, check=True).stdout.strip()
+    return url[:-4] if url.endswith(".git") else url
+
+
+def test_link_preview(page):
+    """Open Graph / twitter tags, the preview image and the source-code link."""
+    tags = page.evaluate("""() => {
+        const out = {};
+        for (const m of document.head.querySelectorAll('meta[property], meta[name]')) {
+            out[m.getAttribute('property') || m.getAttribute('name')] = m.getAttribute('content');
+        }
+        return out; }""")
+    required = ["description", "og:title", "og:description", "og:type", "og:url", "og:image",
+                "og:image:width", "og:image:height", "og:image:alt", "twitter:card"]
+    missing = [key for key in required if not tags.get(key)]
+    check("preview: all Open Graph / twitter / description tags present", not missing, f"missing {missing}")
+    image_url = SITE_URL + OG_IMAGE
+    check("preview: og:url and og:image are absolute https URLs on the site",
+          tags.get("og:url") == SITE_URL and tags.get("og:image") == image_url,
+          f"{tags.get('og:url')} | {tags.get('og:image')}")
+    check("preview: og:type website, twitter:card summary_large_image, size 1200x630",
+          tags.get("og:type") == "website" and tags.get("twitter:card") == "summary_large_image"
+          and (tags.get("og:image:width"), tags.get("og:image:height")) == ("1200", "630"))
+    description = tags.get("description", "")
+    check("preview: description ~150 characters, same as og:description",
+          100 <= len(description) <= 170 and description == tags.get("og:description"),
+          f"{len(description)} chars")
+
+    raw = (SITE / "index.html").read_bytes()
+    head = raw.split(b"<head>\n", 1)[1]
+    order_ok = (head.startswith(b'<meta http-equiv="Content-Security-Policy"')
+                and head.index(b"Content-Security-Policy") < head.index(b'property="og:title"'))
+    check("preview: CSP <meta> still first in <head>, share tags after it", order_ok)
+    charset_at = raw.find(b'<meta charset="utf-8">')
+    check("preview: <meta charset> within the first 1024 bytes", 0 <= charset_at < 1024, f"byte {charset_at}")
+
+    response = page.request.get(BASE + "/" + OG_IMAGE)
+    body = response.body()
+    image = Image.open(io.BytesIO(body))
+    opaque = image.mode == "RGB" or image.convert("RGBA").getchannel("A").getextrema() == (255, 255)
+    check("preview: og-image.png served as image/png, 1200x630, under 1 MB, opaque",
+          response.status == 200 and response.headers.get("content-type", "").startswith("image/png")
+          and image.size == (1200, 630) and len(body) < 1_000_000 and opaque,
+          f"{response.status} {response.headers.get('content-type')} {image.size} {len(body)} bytes")
+
+    link = page.locator("a[data-source-link]")
+    href = link.get_attribute("href") if link.count() == 1 else None
+    expected = git_remote_url()
+    status = None
+    if href:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(href, method="HEAD"), timeout=20) as reply:
+                status = reply.status
+        except urllib.error.HTTPError as error:
+            status = error.code
+    check("preview: one 'Source code' link, to the git remote, which answers 200",
+          href == expected and link.is_visible() and status == 200, f"{href} (remote {expected}) -> {status}")
+
+
 def main():
     if not (SITE / "index.html").exists():
         sys.exit("site/index.html missing: run src/build_map.py first")
@@ -993,6 +1083,7 @@ def main():
             test_views(page)
             test_clamp(page)
             test_hover(page)
+            test_link_preview(page)
             context.close()
             for scheme in ("light", "dark"):
                 test_view_limits(browser, scheme)
