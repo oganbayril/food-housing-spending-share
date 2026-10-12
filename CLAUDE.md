@@ -85,6 +85,8 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
 - [x] Phone: tap shows tooltip when zoomed (01ff6c1), one redraw per frame; 182 checks;
   uploaded 2026-10-11. Lag cause: each redraw re-projects all outlines (~0.45 s at 4x).
   Options A (precision 0) / B (transform during gesture) NOT built: user tests on phone first.
+- [x] Link previews: Open Graph tags + site/og-image.png (1200x630) + Source code link (55a86c4);
+  198 checks; uploaded 2026-10-12 (index.html + og-image.png, chmod 644, no reload).
 
 Pipeline order: `load_eurostat.py` -> `load_oecd.py` -> `combine_sources.py`
 -> `check_missing_values.py` (all in `src/`, run with `uv run python`).
