@@ -5,7 +5,7 @@ Output:
                                 are loaded from Plotly's CDN, so it needs internet)
 - site/shares.csv               the processed data, as a download
 - site/favicon.svg              small icon (avoids a favicon.ico 404)
-- site/og-image.png             link-preview image (Open Graph), Europe, 1200 x 630
+- site/og-image.png             link-preview image (Open Graph), Europe, 1200 x 630 at 2x
 - images/map_2024.png           static image, world view, light theme (README)
 - images/map_2024_europe.png    static image, Europe view, light theme (README)
 
@@ -71,11 +71,12 @@ SITE_URL = "https://food-housing-spending-share.duckdns.org/"
 REPO_URL = "https://github.com/oganbayril/food-housing-spending-share"
 HEADLINE = "How much of household spending goes to food and housing"
 SHARE_DESCRIPTION = (
-    "Food and housing & utilities as a share of household consumption spending in OECD and "
+    "Food, housing and utilities as a share of household consumption spending in OECD and "
     "European countries, 1995-2024, on an interactive map."
 )
 OG_IMAGE = "og-image.png"
 OG_SIZE = (1200, 630)   # the size LinkedIn, WhatsApp, Telegram and X expect for a large card
+OG_SCALE = 2            # rendered at 2x (2400 x 1260): at 1x LinkedIn's card looked blurry
 OG_HEADER_PX = 160      # headline band above the map
 OG_LON_RANGE = [-46, 66]   # the map's box: Iceland to eastern Turkey ...
 OG_LAT_RANGE = [33, 72]    # ... Cyprus / Crete to North Cape
@@ -98,7 +99,7 @@ TIER_NAMES = [
 TIER_SHORT = [f"Lower (below {LOW}%)", f"Moderate ({LOW}-{HIGH}%)", f"Higher ({HIGH}%+)"]
 TIER_ORDER = TIER_NAMES + [NO_DATA]
 LEGEND_TITLE = (
-    "<b>Essentials share</b>: food + housing & utilities<br>"
+    "<b>Essentials share</b>: food, housing and utilities<br>"
     "as a % of household consumption spending"
 )
 
@@ -1034,11 +1035,19 @@ def page_script():
     return script
 
 
-def share_tags():
+def og_image_version(path):
+    """First 10 hex digits of the image's SHA-256. LinkedIn (and other
+    crawlers) cache og:image by URL and do not fetch it again when the page is
+    re-scraped, so the URL carries this: a changed image gets a new URL.
+    Caddy's file_server ignores the query string."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:10]
+
+
+def share_tags(og_version):
     """<meta> tags for link previews (Open Graph, read by LinkedIn, WhatsApp,
     Telegram; X reads twitter:card and falls back to og:*) and for search
     engines (description). They go after the CSP <meta>, which must stay first."""
-    image_url = SITE_URL + OG_IMAGE
+    image_url = f"{SITE_URL}{OG_IMAGE}?v={og_version}"
     tags = [
         ("name", "description", SHARE_DESCRIPTION),
         ("property", "og:type", "website"),
@@ -1046,8 +1055,9 @@ def share_tags():
         ("property", "og:title", HEADLINE),
         ("property", "og:description", SHARE_DESCRIPTION),
         ("property", "og:image", image_url),
-        ("property", "og:image:width", str(OG_SIZE[0])),
-        ("property", "og:image:height", str(OG_SIZE[1])),
+        # the PNG's real pixel size: the 1200 x 630 card rendered at 2x
+        ("property", "og:image:width", str(OG_SIZE[0] * OG_SCALE)),
+        ("property", "og:image:height", str(OG_SIZE[1] * OG_SCALE)),
         ("property", "og:image:alt", OG_IMAGE_ALT),
         ("name", "twitter:card", "summary_large_image"),
     ]
@@ -1057,7 +1067,7 @@ def share_tags():
     return "\n".join(lines)
 
 
-def page_html(fig, table):
+def page_html(fig, table, og_version):
     """The page: header with theme toggle, caption, view buttons, map, notes."""
     # post_script runs once Plotly has finished drawing the map (including
     # loading the map outlines). Theming before that point gets overwritten.
@@ -1078,7 +1088,7 @@ def page_html(fig, table):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Food & Housing Spending Share</title>
-{share_tags()}
+{share_tags(og_version)}
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <script>{EARLY_THEME_SCRIPT}</script>
 <style>
@@ -1134,7 +1144,7 @@ def page_html(fig, table):
   <button type="button" data-theme-button="dark" aria-pressed="false">Dark</button>
 </div>
 </header>
-<p class="lede">Food and housing &amp; utilities as a share of household consumption spending,
+<p class="lede">Food, housing and utilities as a share of household consumption spending,
 {FIRST_YEAR}-{MAP_LAST_YEAR}, OECD and European countries.
 {MAP_DEFAULT_YEAR}: {n_data} of {len(latest)} mapped countries have data.</p>
 <p class="caption"><strong>What the tiers measure:</strong> the essentials share, i.e. spending on
@@ -1286,7 +1296,7 @@ def save_og_image(fig, path):
     )
     for index in range(4, 8):
         static.data[index].marker.size = 18
-    static.write_image(path, width=width, height=height, scale=1)
+    static.write_image(path, width=width, height=height, scale=OG_SCALE)
 
 
 def main():
@@ -1298,8 +1308,14 @@ def main():
 
     SITE_DIR.mkdir(parents=True, exist_ok=True)
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    # The preview image first: the page links it by its content hash.
+    og_path = SITE_DIR / OG_IMAGE
+    save_og_image(fig, og_path)
+    og_version = og_image_version(og_path)
+    print(f"Saved {og_path} ({og_path.stat().st_size / 1e3:.0f} kB, version {og_version})")
+
     html_path = SITE_DIR / "index.html"
-    page = add_csp_meta(page_html(fig, table))
+    page = add_csp_meta(page_html(fig, table, og_version))
     check_csp_meta(page)
     # newline="\n": the same bytes on every OS (Windows would write \r\n).
     html_path.write_text(page, encoding="utf-8", newline="\n")
@@ -1308,8 +1324,6 @@ def main():
     (SITE_DIR / "favicon.svg").write_text(FAVICON_SVG, encoding="utf-8", newline="\n")
     shutil.copyfile(PROCESSED_DIR / "shares.csv", SITE_DIR / "shares.csv")
     print(f"Copied shares.csv to {SITE_DIR}")
-    save_og_image(fig, SITE_DIR / OG_IMAGE)
-    print(f"Saved {SITE_DIR / OG_IMAGE} ({(SITE_DIR / OG_IMAGE).stat().st_size / 1e3:.0f} kB)")
 
     for suffix, view_name in [("", "world"), ("_europe", "europe")]:
         png_path = IMAGES_DIR / f"map_{MAP_DEFAULT_YEAR}{suffix}.png"

@@ -3,7 +3,7 @@
 The thresholds and these checks were fixed in DATA_NOTES.md (D14) before
 this script was run. It reports; it does not change any threshold.
 
-1. Distribution of essentials_share (food + housing & utilities, % of total
+1. Distribution of essentials_share (food, housing and utilities, % of total
    spending): 2024 and all map years, as a text histogram, with tier counts.
 2. Rank (Spearman) correlation with Eurostat's housing cost overburden rate.
 3. Rank correlation with GDP per capita (World Bank, PPP).

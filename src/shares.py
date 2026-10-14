@@ -123,7 +123,7 @@ def compute_shares(data, source, iso3_lookup):
     # is, so take the category's flag and fall back to the total's.
     result["flag"] = result["flag"].fillna(result["total_flag"])
 
-    # Essentials share: food + housing & utilities as a % of total spending.
+    # Essentials share: food, housing and utilities as a % of total spending.
     # It belongs to the country-year, not to one category, so the same value
     # is repeated on the food row and the housing row. min_count=2: if either
     # category is missing, the sum is missing too (not just the other one).

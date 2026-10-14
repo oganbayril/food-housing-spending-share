@@ -21,8 +21,9 @@ deploy/food-housing.caddy, then checks, in each browser:
              Europe and World; the choice survives a reload
   hover      the live tooltip for Germany matches the page data
   preview    Open Graph / twitter / description tags with absolute https
-             URLs, after the CSP meta; og-image.png is a 1200x630 PNG under
-             1 MB; the "Source code" link points to the git remote and works
+             URLs, after the CSP meta; og-image.png is a 2400x1260 PNG
+             (1200x630 at 2x) under 1 MB whose URL carries its content hash;
+             the "Source code" link points to the git remote and works
   phone      (Edge, Android-like emulation) a tap on a country shows its
              tooltip at World, 2x and 4x; a tap on the sea or outside the map
              closes it; a swipe at World scrolls the page; zoomed, a drag pans
@@ -32,6 +33,7 @@ Run from the project root, after src/build_map.py:
 (Firefox needs Playwright's build once: uv run --with playwright playwright install firefox)
 """
 
+import hashlib
 import http.server
 import io
 import json
@@ -1021,13 +1023,14 @@ def test_link_preview(page):
                 "og:image:width", "og:image:height", "og:image:alt", "twitter:card"]
     missing = [key for key in required if not tags.get(key)]
     check("preview: all Open Graph / twitter / description tags present", not missing, f"missing {missing}")
-    image_url = SITE_URL + OG_IMAGE
+    og_image = tags.get("og:image", "")
     check("preview: og:url and og:image are absolute https URLs on the site",
-          tags.get("og:url") == SITE_URL and tags.get("og:image") == image_url,
-          f"{tags.get('og:url')} | {tags.get('og:image')}")
-    check("preview: og:type website, twitter:card summary_large_image, size 1200x630",
+          tags.get("og:url") == SITE_URL and og_image.startswith(SITE_URL + OG_IMAGE + "?v="),
+          f"{tags.get('og:url')} | {og_image}")
+    # 1200 x 630 (the card size) rendered at 2x so it stays sharp when shrunk.
+    check("preview: og:type website, twitter:card summary_large_image, size 2400x1260",
           tags.get("og:type") == "website" and tags.get("twitter:card") == "summary_large_image"
-          and (tags.get("og:image:width"), tags.get("og:image:height")) == ("1200", "630"))
+          and (tags.get("og:image:width"), tags.get("og:image:height")) == ("2400", "1260"))
     description = tags.get("description", "")
     check("preview: description ~150 characters, same as og:description",
           100 <= len(description) <= 170 and description == tags.get("og:description"),
@@ -1041,14 +1044,19 @@ def test_link_preview(page):
     charset_at = raw.find(b'<meta charset="utf-8">')
     check("preview: <meta charset> within the first 1024 bytes", 0 <= charset_at < 1024, f"byte {charset_at}")
 
-    response = page.request.get(BASE + "/" + OG_IMAGE)
+    # Fetched by the URL in the tag (with its ?v=), as a crawler would.
+    response = page.request.get(BASE + "/" + og_image.removeprefix(SITE_URL))
     body = response.body()
     image = Image.open(io.BytesIO(body))
     opaque = image.mode == "RGB" or image.convert("RGBA").getchannel("A").getextrema() == (255, 255)
-    check("preview: og-image.png served as image/png, 1200x630, under 1 MB, opaque",
+    check("preview: og-image.png served as image/png, 2400x1260, under 1 MB, opaque",
           response.status == 200 and response.headers.get("content-type", "").startswith("image/png")
-          and image.size == (1200, 630) and len(body) < 1_000_000 and opaque,
+          and image.size == (2400, 1260) and len(body) < 1_000_000 and opaque,
           f"{response.status} {response.headers.get('content-type')} {image.size} {len(body)} bytes")
+    # Crawlers cache og:image by URL: the URL must change whenever the image does.
+    version = hashlib.sha256(body).hexdigest()[:10]
+    check("preview: og:image URL carries the image's content hash (?v=)",
+          og_image.endswith("?v=" + version), f"{og_image} vs sha256 {version}")
 
     link = page.locator("a[data-source-link]")
     href = link.get_attribute("href") if link.count() == 1 else None

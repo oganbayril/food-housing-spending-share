@@ -1,18 +1,20 @@
 # food-housing-spending-share
 
-How much of household spending goes to food and to housing & utilities,
-across 49 OECD and European countries, 1995-2024.
+How much of household spending goes to food, housing and utilities,
+across 49 OECD and European countries (48 on the map), 1995-2024.
+
+**Live map: https://food-housing-spending-share.duckdns.org**
 
 ![Essentials share tiers, Europe, 2024](images/map_2024_europe.png)
 
-*Interactive map with a year slider: `site/index.html` (draft, not yet
-deployed). World view: [images/map_2024.png](images/map_2024.png).*
+*The live map has a year slider, Play, World and Europe views, and a hover
+for every country. World view: [images/map_2024.png](images/map_2024.png).
+Kosovo is in the data but cannot be drawn on the map (see Limitations).*
 
 ## The question
 
-What share of household consumption spending goes to two basic needs, food
-and housing & utilities, and how does that compare across countries and over
-time?
+What share of household consumption spending goes to food, housing and
+utilities, and how does that compare across countries and over time?
 
 Countries are compared against **fixed thresholds**, the same for every
 country and year, not against their own past. A country changes tier only if
@@ -120,8 +122,8 @@ scripts in `src/`.
 ## Limitations
 
 - **Imputed rent is estimated differently across countries.** It is 22% of
-  housing & utilities in Poland but 72% in Hungary, and its share barely
-  relates to home-ownership rates. Removing it would reorder the housing
+  housing & utilities in Poland but 72% in Hungary (2022), and its share
+  barely relates to home-ownership rates. Removing it would reorder the housing
   ranking substantially. It is kept because it is the standard definition
   and the only one available for every country.
 - **Tourist spending is in the total.** Totals cover all spending on a
@@ -149,11 +151,17 @@ scripts in `src/`.
 - **Gaps.** 2024 has data for 44 of 49 countries; 2025 is not shown because
   too few countries had published it. Very small countries are hard to see
   on the map.
+- **An average hides the typical household.** These are national averages
+  of spending shares. They cannot show how the share varies across income
+  groups: a country can sit in the moderate tier while many of its
+  households spend most of their budget on food and housing. The tiers
+  describe how a country's total spending is split, not how well people
+  live.
 - **Not an affordability measure.** The tiers correlate only weakly with
   Eurostat's housing cost overburden rate (rank correlation about 0.3), which
   compares housing costs with income and excludes imputed rent.
 - **Out of scope on purpose**: healthcare, education, transport and
-  income-based measures. "Essentials" here means food and housing &
+  income-based measures. "Essentials" here means food, housing and
   utilities only.
 
 ## Reproduce

@@ -66,7 +66,7 @@ FIRST_YEAR = 1995
 MAP_LAST_YEAR = 2024
 MAP_DEFAULT_YEAR = 2024
 
-# Tier thresholds for essentials_share (food + housing & utilities as a % of
+# Tier thresholds for essentials_share (food, housing and utilities as a % of
 # total spending). Rationale in DATA_NOTES.md (D14); kept unchanged after the
 # checks (D15, D16). A share at or above a threshold moves up a tier.
 TIER_THRESHOLDS = [35, 45]
