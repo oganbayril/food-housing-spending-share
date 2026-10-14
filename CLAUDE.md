@@ -87,6 +87,9 @@ Known gotcha: Eurostat uses `EL` (Greece) and `UK`, not ISO `GR`/`GB`.
   Options A (precision 0) / B (transform during gesture) NOT built: user tests on phone first.
 - [x] Link previews: Open Graph tags + site/og-image.png (1200x630) + Source code link (55a86c4);
   198 checks; uploaded 2026-10-12 (index.html + og-image.png, chmod 644, no reload).
+- [x] og-image at 2x (2400x1260) with ?v=<sha256[:10]> URL; README for the LinkedIn post;
+  wording "food, housing and utilities" everywhere ("housing & utilities" only as the
+  category label). ddc49e3, 200 checks, uploaded 2026-10-14.
 
 Pipeline order: `load_eurostat.py` -> `load_oecd.py` -> `combine_sources.py`
 -> `check_missing_values.py` (all in `src/`, run with `uv run python`).
