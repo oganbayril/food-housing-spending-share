@@ -115,9 +115,9 @@ scripts in `src/`.
   - **United Kingdom**: food about 5 points below the trend.
 - **2020 stands out.** The lower tier shrinks from 21 countries in 2019 to 5,
   and the higher tier grows from 3 to 10. This likely reflects lower spending
-  on restaurants, travel and leisure during COVID-19, which makes food and
-  housing a larger share of a smaller total (cause not verified). The map
-  notes this on the 2020 and 2021 frames.
+  on restaurants, travel and leisure during COVID-19, which makes food,
+  housing and utilities a larger share of a smaller total (cause not
+  verified). The map notes this on the 2020 and 2021 frames.
 
 ## Limitations
 
@@ -154,9 +154,9 @@ scripts in `src/`.
 - **An average hides the typical household.** These are national averages
   of spending shares. They cannot show how the share varies across income
   groups: a country can sit in the moderate tier while many of its
-  households spend most of their budget on food and housing. The tiers
-  describe how a country's total spending is split, not how well people
-  live.
+  households spend most of their budget on food, housing and utilities. The
+  tiers describe how a country's total spending is split, not how well
+  people live.
 - **Not an affordability measure.** The tiers correlate only weakly with
   Eurostat's housing cost overburden rate (rank correlation about 0.3), which
   compares housing costs with income and excludes imputed rent.

@@ -69,7 +69,7 @@ IMAGES_DIR = PROJECT_ROOT / "images"
 # (origin) without ".git"; the browser test checks they still match.
 SITE_URL = "https://food-housing-spending-share.duckdns.org/"
 REPO_URL = "https://github.com/oganbayril/food-housing-spending-share"
-HEADLINE = "How much of household spending goes to food and housing"
+HEADLINE = "How much of household spending goes to food, housing and utilities"
 SHARE_DESCRIPTION = (
     "Food, housing and utilities as a share of household consumption spending in OECD and "
     "European countries, 1995-2024, on an interactive map."
@@ -82,7 +82,7 @@ OG_LON_RANGE = [-46, 66]   # the map's box: Iceland to eastern Turkey ...
 OG_LAT_RANGE = [33, 72]    # ... Cyprus / Crete to North Cape
 OG_IMAGE_ALT = (
     "Map of Europe shaded in three blue tiers by the share of household spending "
-    f"on food and housing in {MAP_DEFAULT_YEAR}."
+    f"on food, housing and utilities in {MAP_DEFAULT_YEAR}."
 )
 
 # Countries in the data that the base map cannot draw (DATA_NOTES L4).
@@ -1087,7 +1087,7 @@ def page_html(fig, table, og_version):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Food & Housing Spending Share</title>
+<title>Food, Housing and Utilities Spending Share</title>
 {share_tags(og_version)}
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <script>{EARLY_THEME_SCRIPT}</script>
@@ -1287,7 +1287,7 @@ def save_og_image(fig, path):
         ],
         # Lower left, over the Atlantic: no in-scope country there.
         legend=dict(
-            title=dict(text=f"<b>{MAP_DEFAULT_YEAR}</b>: food + housing,<br>% of household spending",
+            title=dict(text=f"<b>{MAP_DEFAULT_YEAR}</b>: food, housing and utilities,<br>% of household spending",
                        side="top", font=dict(size=22, color=LIGHT["text"])),
             orientation="v", x=0.01, y=0.03, xanchor="left", yanchor="bottom",
             font=dict(size=22, color=LIGHT["text"]), bgcolor=LIGHT["legend_bg"],
